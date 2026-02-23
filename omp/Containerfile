@@ -1,10 +1,13 @@
-FROM oven/bun:latest
+FROM oven/bun:debian
+
+RUN apt-get update -y && apt-get install -y curl python3 && apt-get clean
 
 RUN mkdir -p /home/omp/{.omp,code} \
-	&& chmod -R 755 /home/omp
+  && chmod -R 755 /home/omp
 
 WORKDIR /home/omp/code
 
-RUN bun install --trust -g @oh-my-pi/pi-coding-agent
+RUN bun install --trust -g @oh-my-pi/pi-coding-agent && \
+  omp install npm:@aliou/pi-guardrails
 
 CMD ["/usr/local/bin/omp"]
