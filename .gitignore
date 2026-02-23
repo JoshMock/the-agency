@@ -1,0 +1,3 @@
+*.db
+omp/agent/sessions/*
+.db-shm

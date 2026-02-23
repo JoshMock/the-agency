@@ -1,0 +1,10 @@
+FROM oven/bun:latest
+
+RUN mkdir -p /home/omp/{.omp,code} \
+	&& chmod -R 755 /home/omp
+
+WORKDIR /home/omp/code
+
+RUN bun install --trust -g @oh-my-pi/pi-coding-agent
+
+CMD ["/usr/local/bin/omp"]

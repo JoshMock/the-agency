@@ -1,0 +1,48 @@
+---
+services:
+  omp:
+    build:
+      context: ./omp
+    volumes:
+      - ${HOME}/Code:/home/omp/code:Z
+      - ./omp/agent:/home/omp/.omp/agent:Z
+    environment:
+      HOME: /home/omp
+    user: "${UID}:${GID}"
+    working_dir: /home/omp/code
+    tty: true
+    stdin_open: true
+    depends_on:
+      - mcp-docs
+      - vllm
+
+  mcp-docs:
+    image: ghcr.io/arabold/docs-mcp-server:latest
+    volumes:
+      - docs-mcp-data:/data
+      - ./mcp/docs:/config
+    ports:
+      - 6280:6280
+    command: ["--protocol", "http", "--host", "0.0.0.0", "--port", "6280"]
+
+  vllm:
+    image: vllm/vllm-openai:latest
+    volumes:
+      - vllm-data:/root/.cache/huggingface
+    ports:
+      - 8000:8000
+    ipc: host
+    args: [--model, open-thoughts/OpenThinker-Agent-v1]
+    environment:
+      HF_TOKEN: ${HF_TOKEN}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  docs-mcp-data:
+  vllm-data:

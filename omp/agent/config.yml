@@ -1,0 +1,4 @@
+lastChangelogVersion: 12.18.3
+collapseChangelog: true
+lsp:
+  formatOnWrite: true

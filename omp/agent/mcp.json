@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "docs": {
+      "type": "http",
+      "url": "http://mcp-docs:6280/mcp"
+    }
+  }
+}
