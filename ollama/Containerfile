@@ -1,9 +1,0 @@
-# containerfile adapted from https://github.com/SvobodaGaming/ollama-docker
-FROM nvidia/cuda:13.1.1-cudnn-runtime-ubuntu24.04
-
-RUN apt-get update -y && apt-get install -y curl zstd && apt-get clean
-ENV NVIDIA_VISIBLE_DEVICES=all
-
-RUN curl -fsSL https://ollama.com/install.sh | sh
-
-CMD ["ollama", "serve"]
