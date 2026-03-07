@@ -119,8 +119,6 @@ export default function (pi: ExtensionAPI) {
     pi.setActiveTools([...without, 'hashline_read', 'hashline_edit'])
   })
 
-  // ── hashline_read ──────────────────────────────────────────────────────
-
   pi.registerTool({
     name: 'hashline_read',
     label: 'Hashline Read',
@@ -207,8 +205,6 @@ export default function (pi: ExtensionAPI) {
       }
     },
   })
-
-  // ── hashline_edit ──────────────────────────────────────────────────────
 
   pi.registerTool({
     name: 'hashline_edit',
