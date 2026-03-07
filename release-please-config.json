@@ -1,0 +1,12 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "packages": {
+    "packages/hashline-edit": {
+      "component": "pi-hashline-edit"
+    },
+    "packages/tokenshrink": {
+      "component": "pi-tokenshrink"
+    }
+  }
+}

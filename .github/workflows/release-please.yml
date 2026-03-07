@@ -1,0 +1,73 @@
+name: Release Please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      hashline-edit-release-created: ${{ steps.release.outputs['pi-hashline-edit--release_created'] }}
+      tokenshrink-release-created: ${{ steps.release.outputs['pi-tokenshrink--release_created'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish-hashline-edit:
+    needs: release-please
+    if: ${{ needs.release-please.outputs['hashline-edit-release-created'] }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test
+
+      - name: Publish
+        run: npm publish --workspace packages/hashline-edit
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-tokenshrink:
+    needs: release-please
+    if: ${{ needs.release-please.outputs['tokenshrink-release-created'] }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test
+
+      - name: Publish
+        run: npm publish --workspace packages/tokenshrink
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
