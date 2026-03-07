@@ -5,6 +5,9 @@
     "url": "https://github.com/JoshMock/the-agency/issues"
   },
   "homepage": "https://github.com/JoshMock/the-agency#readme",
+  "scripts": {
+    "test": "npm test --workspaces"
+  },
   "workspaces": [
     "packages/*"
   ]

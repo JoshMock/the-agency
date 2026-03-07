@@ -4,6 +4,9 @@
   "description": "Pi extension providing hashline-based file reading and editing with staleness-checked line addressing.",
   "type": "module",
   "main": "index.ts",
+  "scripts": {
+    "test": "node --experimental-transform-types --test hashline.test.ts"
+  },
   "pi": {
     "extensions": [
       "./index.ts"
