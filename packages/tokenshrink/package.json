@@ -1,5 +1,5 @@
 {
-  "name": "pi-tokenshrink",
+  "name": "@the-agency/pi-tokenshrink",
   "version": "0.1.0",
   "description": "Reduce token usage of a Pi agent's conversation context using TokenShrink.",
   "type": "module",
@@ -12,6 +12,20 @@
       "./index.ts"
     ]
   },
+  "files": [
+    "*.ts",
+    "!*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi",
+    "pi-package",
+    "tokenshrink",
+    "agents",
+    "llm",
+    "tokens"
+  ],
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   },
