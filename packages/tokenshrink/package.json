@@ -5,7 +5,9 @@
   "type": "module",
   "main": "index.ts",
   "scripts": {
-    "test": "node --experimental-transform-types --test index.test.ts"
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "test": "npm run lint && node --experimental-transform-types --test index.test.ts"
   },
   "pi": {
     "extensions": [

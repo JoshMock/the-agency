@@ -1,14 +1,21 @@
 {
   "name": "the-agency",
   "private": true,
+  "type": "module",
   "bugs": {
     "url": "https://github.com/JoshMock/the-agency/issues"
   },
   "homepage": "https://github.com/JoshMock/the-agency#readme",
   "scripts": {
+    "lint": "npm run lint --workspaces",
+    "lint:fix": "npm run lint:fix --workspaces",
     "test": "npm test --workspaces"
   },
   "workspaces": [
     "packages/*"
-  ]
+  ],
+  "devDependencies": {
+    "eslint": "^9.39.4",
+    "neostandard": "^0.13.0"
+  }
 }

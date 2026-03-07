@@ -40,61 +40,61 @@
  * module, which would complicate the call sites. The implementation below is
  * short, self-contained, and fully covered by the existing test suite.
  */
-const _P1 = 0x9e3779b1;
-const _P2 = 0x85ebca77;
-const _P3 = 0xc2b2ae3d;
-const _P4 = 0x27d4eb2f;
-const _P5 = 0x165667b1;
-const _enc = new TextEncoder();
+const _P1 = 0x9e3779b1
+const _P2 = 0x85ebca77
+const _P3 = 0xc2b2ae3d
+const _P4 = 0x27d4eb2f
+const _P5 = 0x165667b1
+const _enc = new TextEncoder()
 
-function _rotl32(x: number, r: number): number {
-  return (x << r) | (x >>> (32 - r));
+function _rotl32 (x: number, r: number): number {
+  return (x << r) | (x >>> (32 - r))
 }
 
-function xxHash32(str: string, seed = 0): number {
-  const data = _enc.encode(str);
-  const len = data.length;
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  let h32: number;
-  let p = 0;
+function xxHash32 (str: string, seed = 0): number {
+  const data = _enc.encode(str)
+  const len = data.length
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength)
+  let h32: number
+  let p = 0
 
   if (len >= 16) {
-    let v1 = (seed + _P1 + _P2) >>> 0;
-    let v2 = (seed + _P2) >>> 0;
-    let v3 = seed >>> 0;
-    let v4 = (seed - _P1) >>> 0;
+    let v1 = (seed + _P1 + _P2) >>> 0
+    let v2 = (seed + _P2) >>> 0
+    let v3 = seed >>> 0
+    let v4 = (seed - _P1) >>> 0
     do {
-      v1 = Math.imul(_rotl32((v1 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4;
-      v2 = Math.imul(_rotl32((v2 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4;
-      v3 = Math.imul(_rotl32((v3 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4;
-      v4 = Math.imul(_rotl32((v4 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4;
-    } while (p <= len - 16);
-    h32 = (_rotl32(v1, 1) + _rotl32(v2, 7) + _rotl32(v3, 12) + _rotl32(v4, 18)) >>> 0;
+      v1 = Math.imul(_rotl32((v1 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4
+      v2 = Math.imul(_rotl32((v2 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4
+      v3 = Math.imul(_rotl32((v3 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4
+      v4 = Math.imul(_rotl32((v4 + Math.imul(view.getUint32(p, true), _P2)) >>> 0, 13), _P1) >>> 0; p += 4
+    } while (p <= len - 16)
+    h32 = (_rotl32(v1, 1) + _rotl32(v2, 7) + _rotl32(v3, 12) + _rotl32(v4, 18)) >>> 0
   } else {
-    h32 = (seed + _P5) >>> 0;
+    h32 = (seed + _P5) >>> 0
   }
 
-  h32 = (h32 + len) >>> 0;
+  h32 = (h32 + len) >>> 0
 
   while (p <= len - 4) {
-    h32 = Math.imul(_rotl32((h32 ^ Math.imul(view.getUint32(p, true), _P3)) >>> 0, 17), _P4) >>> 0;
-    p += 4;
+    h32 = Math.imul(_rotl32((h32 ^ Math.imul(view.getUint32(p, true), _P3)) >>> 0, 17), _P4) >>> 0
+    p += 4
   }
   while (p < len) {
-    h32 = Math.imul(_rotl32((h32 ^ Math.imul(data[p], _P5)) >>> 0, 11), _P1) >>> 0;
-    p++;
+    h32 = Math.imul(_rotl32((h32 ^ Math.imul(data[p], _P5)) >>> 0, 11), _P1) >>> 0
+    p++
   }
 
-  h32 ^= h32 >>> 15;
-  h32 = Math.imul(h32, _P2) >>> 0;
-  h32 ^= h32 >>> 13;
-  h32 = Math.imul(h32, _P3) >>> 0;
-  h32 ^= h32 >>> 16;
+  h32 ^= h32 >>> 15
+  h32 = Math.imul(h32, _P2) >>> 0
+  h32 ^= h32 >>> 13
+  h32 = Math.imul(h32, _P3) >>> 0
+  h32 ^= h32 >>> 16
 
-  return h32;
+  return h32
 }
 
-const NIBBLE_STR = "ZPMQVRWSNKTXJBYH"
+const NIBBLE_STR = 'ZPMQVRWSNKTXJBYH'
 
 const DICT = Array.from({ length: 256 }, (_, i) => {
   const h = i >>> 4
@@ -110,9 +110,9 @@ export interface Anchor {
 }
 
 export type HashlineEdit =
-  | { op: "replace"; pos: Anchor; end?: Anchor; lines: string[] }
-  | { op: "append"; pos?: Anchor; lines: string[] }
-  | { op: "prepend"; pos?: Anchor; lines: string[] }
+  | { op: 'replace'; pos: Anchor; end?: Anchor; lines: string[] }
+  | { op: 'append'; pos?: Anchor; lines: string[] }
+  | { op: 'prepend'; pos?: Anchor; lines: string[] }
 
 export interface HashMismatch {
   line: number
@@ -127,11 +127,11 @@ export interface HashMismatch {
  * alphanumeric characters, the line number is mixed in as the seed
  * to reduce collisions among punctuation-only / blank lines.
  */
-export function computeLineHash(idx: number, line: string): string {
-  if (line.endsWith("\r")) {
+export function computeLineHash (idx: number, line: string): string {
+  if (line.endsWith('\r')) {
     line = line.slice(0, -1)
   }
-  line = line.replace(/\s+/g, "")
+  line = line.replace(/\s+/g, '')
 
   let seed = 0
   if (!RE_SIGNIFICANT.test(line)) {
@@ -141,7 +141,7 @@ export function computeLineHash(idx: number, line: string): string {
 }
 
 /** Format a `LINE#HASH` tag. */
-export function formatLineTag(line: number, text: string): string {
+export function formatLineTag (line: number, text: string): string {
   return `${line}#${computeLineHash(line, text)}`
 }
 
@@ -150,20 +150,20 @@ export function formatLineTag(line: number, text: string): string {
  *
  * Each output line becomes `LINENUM#HASH:TEXT` (1-indexed).
  */
-export function formatHashLines(text: string, startLine = 1): string {
-  const lines = text.split("\n")
+export function formatHashLines (text: string, startLine = 1): string {
+  const lines = text.split('\n')
   return lines
     .map((line, i) => {
       const num = startLine + i
       return `${formatLineTag(num, line)}:${line}`
     })
-    .join("\n")
+    .join('\n')
 }
 
 /**
  * Parse a line reference like `"5#ZP"` into `{ line, hash }`.
  */
-export function parseTag(ref: string): Anchor {
+export function parseTag (ref: string): Anchor {
   const match = ref.match(/^\s*[>+-]*\s*(\d+)\s*#\s*([ZPMQVRWSNKTXJBYH]{2})/)
   if (!match) {
     throw new Error(
@@ -182,12 +182,12 @@ const MISMATCH_CONTEXT = 2
 export class HashlineMismatchError extends Error {
   readonly remaps: ReadonlyMap<string, string>
 
-  constructor(
+  constructor (
     public readonly mismatches: HashMismatch[],
     public readonly fileLines: string[]
   ) {
     super(HashlineMismatchError.formatMessage(mismatches, fileLines))
-    this.name = "HashlineMismatchError"
+    this.name = 'HashlineMismatchError'
     const remaps = new Map<string, string>()
     for (const m of mismatches) {
       const actual = computeLineHash(m.line, fileLines[m.line - 1])
@@ -196,7 +196,7 @@ export class HashlineMismatchError extends Error {
     this.remaps = remaps
   }
 
-  static formatMessage(
+  static formatMessage (
     mismatches: HashMismatch[],
     fileLines: string[]
   ): string {
@@ -218,14 +218,14 @@ export class HashlineMismatchError extends Error {
     const lines: string[] = []
 
     lines.push(
-      `${mismatches.length} line${mismatches.length > 1 ? "s have" : " has"} changed since last read. Use the updated LINE#ID references shown below (>>> marks changed lines).`
+      `${mismatches.length} line${mismatches.length > 1 ? 's have' : ' has'} changed since last read. Use the updated LINE#ID references shown below (>>> marks changed lines).`
     )
-    lines.push("")
+    lines.push('')
 
     let prevLine = -1
     for (const lineNum of sorted) {
       if (prevLine !== -1 && lineNum > prevLine + 1) {
-        lines.push("    ...")
+        lines.push('    ...')
       }
       prevLine = lineNum
 
@@ -239,7 +239,7 @@ export class HashlineMismatchError extends Error {
         lines.push(`    ${prefix}:${text}`)
       }
     }
-    return lines.join("\n")
+    return lines.join('\n')
   }
 }
 
@@ -249,20 +249,20 @@ export class HashlineMismatchError extends Error {
  * Edits are validated for hash correctness then applied bottom-up so
  * earlier splices don't invalidate later line numbers.
  */
-export function applyHashlineEdits(
+export function applyHashlineEdits (
   text: string,
   edits: HashlineEdit[]
 ): {
-  lines: string
-  firstChangedLine: number | undefined
-  warnings?: string[]
-  noopEdits?: Array<{ editIndex: number; loc: string; current: string }>
-} {
+    lines: string
+    firstChangedLine: number | undefined
+    warnings?: string[]
+    noopEdits?: Array<{ editIndex: number; loc: string; current: string }>
+  } {
   if (edits.length === 0) {
     return { lines: text, firstChangedLine: undefined }
   }
 
-  const fileLines = text.split("\n")
+  const fileLines = text.split('\n')
   const originalFileLines = [...fileLines]
   let firstChangedLine: number | undefined
   const noopEdits: Array<{ editIndex: number; loc: string; current: string }> =
@@ -271,7 +271,7 @@ export function applyHashlineEdits(
 
   // pre-validate all hashes before mutating
   const mismatches: HashMismatch[] = []
-  function validateRef(ref: Anchor): boolean {
+  function validateRef (ref: Anchor): boolean {
     if (ref.line < 1 || ref.line > fileLines.length) {
       throw new Error(
         `Line ${ref.line} does not exist (file has ${fileLines.length} lines)`
@@ -285,7 +285,7 @@ export function applyHashlineEdits(
 
   for (const edit of edits) {
     switch (edit.op) {
-      case "replace": {
+      case 'replace': {
         if (edit.end) {
           const startValid = validateRef(edit.pos)
           const endValid = validateRef(edit.end)
@@ -300,14 +300,14 @@ export function applyHashlineEdits(
         }
         break
       }
-      case "append": {
+      case 'append': {
         if (edit.pos && !validateRef(edit.pos)) continue
-        if (edit.lines.length === 0) edit.lines = [""]
+        if (edit.lines.length === 0) edit.lines = ['']
         break
       }
-      case "prepend": {
+      case 'prepend': {
         if (edit.pos && !validateRef(edit.pos)) continue
-        if (edit.lines.length === 0) edit.lines = [""]
+        if (edit.lines.length === 0) edit.lines = ['']
         break
       }
     }
@@ -320,21 +320,21 @@ export function applyHashlineEdits(
   // autocorrect escaped tabs
   for (const edit of edits) {
     if (edit.lines.length === 0) continue
-    const hasEscapedTabs = edit.lines.some((l) => l.includes("\\t"))
+    const hasEscapedTabs = edit.lines.some((l) => l.includes('\\t'))
     if (!hasEscapedTabs) continue
-    const hasRealTabs = edit.lines.some((l) => l.includes("\t"))
+    const hasRealTabs = edit.lines.some((l) => l.includes('\t'))
     if (hasRealTabs) continue
     let correctedCount = 0
     const corrected = edit.lines.map((line) =>
       line.replace(/^((?:\\t)+)/, (escaped) => {
         correctedCount += escaped.length / 2
-        return "\t".repeat(escaped.length / 2)
+        return '\t'.repeat(escaped.length / 2)
       })
     )
     if (correctedCount === 0) continue
     edit.lines = corrected
     warnings.push(
-      "Auto-corrected escaped tab indentation: converted leading \\t to real tab characters"
+      'Auto-corrected escaped tab indentation: converted leading \\t to real tab characters'
     )
   }
 
@@ -345,19 +345,19 @@ export function applyHashlineEdits(
     const edit = edits[i]
     let lineKey: string
     switch (edit.op) {
-      case "replace":
+      case 'replace':
         lineKey = edit.end
           ? `r:${edit.pos.line}:${edit.end.line}`
           : `s:${edit.pos.line}`
         break
-      case "append":
-        lineKey = edit.pos ? `i:${edit.pos.line}` : "ieof"
+      case 'append':
+        lineKey = edit.pos ? `i:${edit.pos.line}` : 'ieof'
         break
-      case "prepend":
-        lineKey = edit.pos ? `ib:${edit.pos.line}` : "ibef"
+      case 'prepend':
+        lineKey = edit.pos ? `ib:${edit.pos.line}` : 'ibef'
         break
     }
-    const dstKey = `${lineKey}:${edit.lines.join("\n")}`
+    const dstKey = `${lineKey}:${edit.lines.join('\n')}`
     if (seenEditKeys.has(dstKey)) {
       dedupIndices.add(i)
     } else {
@@ -375,15 +375,15 @@ export function applyHashlineEdits(
     let sortLine: number
     let precedence: number
     switch (edit.op) {
-      case "replace":
+      case 'replace':
         sortLine = edit.end ? edit.end.line : edit.pos.line
         precedence = 0
         break
-      case "append":
+      case 'append':
         sortLine = edit.pos ? edit.pos.line : fileLines.length + 1
         precedence = 1
         break
-      case "prepend":
+      case 'prepend':
         sortLine = edit.pos ? edit.pos.line : 0
         precedence = 2
         break
@@ -398,7 +398,7 @@ export function applyHashlineEdits(
       a.idx - b.idx
   )
 
-  function trackFirstChanged(line: number): void {
+  function trackFirstChanged (line: number): void {
     if (firstChangedLine === undefined || line < firstChangedLine) {
       firstChangedLine = line
     }
@@ -407,7 +407,7 @@ export function applyHashlineEdits(
   // apply edits bottom-up
   for (const { edit, idx } of annotated) {
     switch (edit.op) {
-      case "replace": {
+      case 'replace': {
         if (!edit.end) {
           const origLines = originalFileLines.slice(
             edit.pos.line - 1,
@@ -417,7 +417,7 @@ export function applyHashlineEdits(
             noopEdits.push({
               editIndex: idx,
               loc: `${edit.pos.line}#${edit.pos.hash}`,
-              current: origLines.join("\n"),
+              current: origLines.join('\n'),
             })
             break
           }
@@ -446,12 +446,12 @@ export function applyHashlineEdits(
         }
         break
       }
-      case "append": {
+      case 'append': {
         if (edit.lines.length === 0) {
           noopEdits.push({
             editIndex: idx,
-            loc: edit.pos ? `${edit.pos.line}#${edit.pos.hash}` : "EOF",
-            current: edit.pos ? originalFileLines[edit.pos.line - 1] : "",
+            loc: edit.pos ? `${edit.pos.line}#${edit.pos.hash}` : 'EOF',
+            current: edit.pos ? originalFileLines[edit.pos.line - 1] : '',
           })
           break
         }
@@ -459,7 +459,7 @@ export function applyHashlineEdits(
           fileLines.splice(edit.pos.line, 0, ...edit.lines)
           trackFirstChanged(edit.pos.line + 1)
         } else {
-          if (fileLines.length === 1 && fileLines[0] === "") {
+          if (fileLines.length === 1 && fileLines[0] === '') {
             fileLines.splice(0, 1, ...edit.lines)
             trackFirstChanged(1)
           } else {
@@ -469,12 +469,12 @@ export function applyHashlineEdits(
         }
         break
       }
-      case "prepend": {
+      case 'prepend': {
         if (edit.lines.length === 0) {
           noopEdits.push({
             editIndex: idx,
-            loc: edit.pos ? `${edit.pos.line}#${edit.pos.hash}` : "BOF",
-            current: edit.pos ? originalFileLines[edit.pos.line - 1] : "",
+            loc: edit.pos ? `${edit.pos.line}#${edit.pos.hash}` : 'BOF',
+            current: edit.pos ? originalFileLines[edit.pos.line - 1] : '',
           })
           break
         }
@@ -482,7 +482,7 @@ export function applyHashlineEdits(
           fileLines.splice(edit.pos.line - 1, 0, ...edit.lines)
           trackFirstChanged(edit.pos.line)
         } else {
-          if (fileLines.length === 1 && fileLines[0] === "") {
+          if (fileLines.length === 1 && fileLines[0] === '') {
             fileLines.splice(0, 1, ...edit.lines)
           } else {
             fileLines.splice(0, 0, ...edit.lines)
@@ -495,7 +495,7 @@ export function applyHashlineEdits(
   }
 
   return {
-    lines: fileLines.join("\n"),
+    lines: fileLines.join('\n'),
     firstChangedLine,
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(noopEdits.length > 0 ? { noopEdits } : {}),

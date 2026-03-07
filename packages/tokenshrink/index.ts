@@ -2,13 +2,13 @@
  * TokenShrink extension: compresses context messages to save tokens before LLM calls.
  */
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent"
-import { compress } from "tokenshrink"
+import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
+import { compress } from 'tokenshrink'
 
-type TokenShrinkDomain = "auto" | "code" | "medical" | "legal" | "business"
+type TokenShrinkDomain = 'auto' | 'code' | 'medical' | 'legal' | 'business'
 
 type TextContent = {
-  type: "text"
+  type: 'text'
   text: string
   [key: string]: unknown
 }
@@ -23,16 +23,16 @@ const MIN_ORIGINAL_TOKENS = 120
 const MIN_SAVED_TOKENS = 12
 const CODE_PATTERN =
   /```|\b(class|interface|function|const|let|var|import|export|namespace|SELECT|UPDATE|INSERT|DELETE)\b|=>|#include|<\/?[A-Za-z][^>]*>/i
-const STATUS_KEY = "tokenshrink"
+const STATUS_KEY = 'tokenshrink'
 
 export default function (pi: ExtensionAPI) {
   let enabled = true
   let lastSaved = 0
   let lastCompressed = 0
 
-  pi.on("context", (event, ctx) => {
+  pi.on('context', (event, ctx) => {
     if (!enabled) {
-      if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, "TokenShrink off")
+      if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, 'TokenShrink off')
       return
     }
 
@@ -63,59 +63,59 @@ export default function (pi: ExtensionAPI) {
     if (ctx.hasUI) {
       ctx.ui.setStatus(
         STATUS_KEY,
-        compressedParts > 0 ? `TokenShrink saved ~${saved} tokens` : undefined,
+        compressedParts > 0 ? `TokenShrink saved ~${saved} tokens` : undefined
       )
     }
 
     return { messages }
   })
 
-  pi.registerCommand("tokenshrink", {
-    description: "Toggle TokenShrink or show recent savings (usage: /tokenshrink [on|off|toggle])",
+  pi.registerCommand('tokenshrink', {
+    description: 'Toggle TokenShrink or show recent savings (usage: /tokenshrink [on|off|toggle])',
     handler: async (args, ctx) => {
       const normalized = args?.trim().toLowerCase()
 
-      if (normalized === "on" || normalized === "off" || normalized === "toggle") {
-        enabled = normalized === "toggle" ? !enabled : normalized === "on"
-        const status = enabled ? "enabled" : "disabled"
+      if (normalized === 'on' || normalized === 'off' || normalized === 'toggle') {
+        enabled = normalized === 'toggle' ? !enabled : normalized === 'on'
+        const status = enabled ? 'enabled' : 'disabled'
 
-        if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, enabled ? "TokenShrink on" : undefined)
-        ctx.ui.notify(`TokenShrink ${status}`, "info")
+        if (ctx.hasUI) ctx.ui.setStatus(STATUS_KEY, enabled ? 'TokenShrink on' : undefined)
+        ctx.ui.notify(`TokenShrink ${status}`, 'info')
         return
       }
 
       const summary = enabled
-        ? `TokenShrink on; last save ~${lastSaved} tokens across ${lastCompressed} part${lastCompressed === 1 ? "" : "s"}.`
-        : "TokenShrink is currently off."
-      ctx.ui.notify(summary, "info")
+        ? `TokenShrink on; last save ~${lastSaved} tokens across ${lastCompressed} part${lastCompressed === 1 ? '' : 's'}.`
+        : 'TokenShrink is currently off.'
+      ctx.ui.notify(summary, 'info')
     },
   })
 }
 
-function shouldProcessMessage(message: Message): boolean {
+function shouldProcessMessage (message: Message): boolean {
   if (!message.content?.length) return false
-  if (message.role === "tool") return false
-  if (message.role === "system") return false
+  if (message.role === 'tool') return false
+  if (message.role === 'system') return false
   return true
 }
 
-function isTextContent(content: unknown): content is TextContent {
+function isTextContent (content: unknown): content is TextContent {
   return (
     content != null &&
-    typeof content === "object" &&
-    (content as { type?: string }).type === "text" &&
-    typeof (content as { text?: unknown }).text === "string"
+    typeof content === 'object' &&
+    (content as { type?: string }).type === 'text' &&
+    typeof (content as { text?: unknown }).text === 'string'
   )
 }
 
-function selectDomain(text: string, role?: string): TokenShrinkDomain {
-  if (role === "user" || role === "assistant" || role === "custom") {
-    if (CODE_PATTERN.test(text)) return "code"
+function selectDomain (text: string, role?: string): TokenShrinkDomain {
+  if (role === 'user' || role === 'assistant' || role === 'custom') {
+    if (CODE_PATTERN.test(text)) return 'code'
   }
-  return "auto"
+  return 'auto'
 }
 
-function compressText(text: string, domain: TokenShrinkDomain) {
+function compressText (text: string, domain: TokenShrinkDomain) {
   const result = compress(text, { domain })
   const { originalTokens, totalCompressedTokens, tokensSaved } = result.stats
 
