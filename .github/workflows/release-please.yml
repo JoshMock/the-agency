@@ -24,7 +24,7 @@ jobs:
 
   publish-hashline-edit:
     needs: release-please
-  if: ${{ needs.release-please.outputs['hashline-edit-release-created'] == 'true' }}
+    if: ${{ needs.release-please.outputs['hashline-edit-release-created'] == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -44,12 +44,10 @@ jobs:
 
       - name: Publish
         run: npm publish --workspace packages/hashline-edit
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
   publish-tokenshrink:
     needs: release-please
-  if: ${{ needs.release-please.outputs['tokenshrink-release-created'] == 'true' }}
+    if: ${{ needs.release-please.outputs['tokenshrink-release-created'] == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -69,5 +67,3 @@ jobs:
 
       - name: Publish
         run: npm publish --workspace packages/tokenshrink
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
