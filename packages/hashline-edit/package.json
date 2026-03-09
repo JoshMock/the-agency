@@ -33,4 +33,13 @@
     "@sinclair/typebox": "*"
   },
   "license": "MIT"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JoshMock/the-agency.git",
+    "directory": "packages/hashline-edit"
+  },
+  "bugs": {
+    "url": "https://github.com/JoshMock/the-agency/issues"
+  },
+  "homepage": "https://github.com/JoshMock/the-agency/tree/main/packages/hashline-edit#readme"
 }
