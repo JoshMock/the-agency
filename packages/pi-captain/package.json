@@ -1,0 +1,53 @@
+{
+  "name": "@the-agency/pi-captain",
+  "version": "0.1.0",
+  "description": "Pi extension that spawns sandboxed Pi sub-agents in forked child processes with kernel-enforced filesystem policies via nono.",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "install-deps": "npm install"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "*.ts",
+    "src/**/*.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi",
+    "pi-package",
+    "agents",
+    "sandbox",
+    "security",
+    "subagent"
+  ],
+  "dependencies": {
+    "nono-ts": "^0.3.0"
+  },
+  "optionalDependencies": {
+    "nono-ts-linux-x64-gnu": "0.3.0",
+    "nono-ts-linux-arm64-gnu": "0.3.0",
+    "nono-ts-darwin-x64": "0.3.0",
+    "nono-ts-darwin-arm64": "0.3.0"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-ai": "*",
+    "@sinclair/typebox": "*"
+  },
+  "license": "MIT"
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JoshMock/the-agency.git",
+    "directory": "packages/pi-captain"
+  },
+  "bugs": {
+    "url": "https://github.com/JoshMock/the-agency/issues"
+  },
+  "homepage": "https://github.com/JoshMock/the-agency/tree/main/packages/pi-captain#readme"
+}
