@@ -57,16 +57,17 @@ export default function (pi: ExtensionAPI) {
     label: "Spawn Agent",
     description:
       "Spawn a sandboxed Pi sub-agent in a forked child process. " +
+      "The required `prompt` parameter is the task or question sent to the sub-agent. " +
       "The sub-agent runs with a kernel-enforced filesystem sandbox via nono " +
       "(Landlock on Linux, Seatbelt on macOS). Tools are passed by capability " +
       "reference: the child holds no direct access — all tool calls are forwarded " +
       "to the parent over a Unix domain socket and executed there. " +
       "The parent controls the prompt, model, working directory, available tools, " +
       "and the sandbox policy. All output is captured and returned.",
-    promptSnippet: "Spawn a sandboxed Pi sub-agent with a given prompt, model, cwd, tools, and nono sandbox policy",
+    promptSnippet: "Spawn a sandboxed Pi sub-agent — pass a `prompt` containing the task or question for the sub-agent to work on",
     parameters: Type.Object({
       prompt: Type.String({
-        description: "The prompt to send to the sub-agent",
+        description: "Required. The task or question for the sub-agent to work on.",
       }),
       model: Type.Optional(
         Type.String({

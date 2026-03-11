@@ -40,7 +40,7 @@
     "@mariozechner/pi-ai": "*",
     "@sinclair/typebox": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/JoshMock/the-agency.git",
