@@ -14,6 +14,7 @@ jobs:
     outputs:
       hashline-edit-release-created: ${{ steps.release.outputs['pi-hashline-edit--release_created'] }}
       tokenshrink-release-created: ${{ steps.release.outputs['pi-tokenshrink--release_created'] }}
+      spec-kit-release-created: ${{ steps.release.outputs['pi-spec-kit--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -40,7 +41,7 @@ jobs:
         run: npm install
 
       - name: Run tests
-        run: npm test
+        run: npm test --workspace packages/hashline-edit
 
       - name: Publish
         run: npm publish --workspace packages/hashline-edit
@@ -63,7 +64,30 @@ jobs:
         run: npm install
 
       - name: Run tests
-        run: npm test
+        run: npm test --workspace packages/tokenshrink
 
       - name: Publish
         run: npm publish --workspace packages/tokenshrink
+
+  publish-spec-kit:
+    needs: release-please
+    if: ${{ needs.release-please.outputs['spec-kit-release-created'] == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test --workspace packages/spec-kit
+
+      - name: Publish
+        run: npm publish --workspace packages/spec-kit

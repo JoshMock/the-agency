@@ -7,6 +7,9 @@
     },
     "packages/tokenshrink": {
       "component": "pi-tokenshrink"
+    },
+    "packages/spec-kit": {
+      "component": "pi-spec-kit"
     }
   }
 }

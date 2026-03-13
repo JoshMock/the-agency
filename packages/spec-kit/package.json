@@ -1,6 +1,7 @@
 {
   "name": "@the-agency/pi-spec-kit",
   "version": "0.1.0",
+  "type": "module",
   "keywords": [
     "pi-package",
     "spec-kit",
@@ -8,6 +9,9 @@
     "pi",
     "agents"
   ],
+  "scripts": {
+    "test": "node --experimental-transform-types --test extensions/index.test.ts"
+  },
   "files": [
     "extensions/**",
     "skills/**",
@@ -19,5 +23,8 @@
     "extensions": [
       "./extensions"
     ]
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
   }
 }
