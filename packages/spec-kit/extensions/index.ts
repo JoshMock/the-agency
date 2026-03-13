@@ -18,9 +18,10 @@ const skills = [
   { name: "speckit-constitution", description: "Create or update the project constitution" },
 ];
 
-function loadSkill(name: string): string {
+function loadSkill(name: string): { content: string; skillPath: string } {
   const skillPath = join(__dirname, "..", "skills", name, "SKILL.md");
-  return readFileSync(skillPath, "utf-8");
+  const content = readFileSync(skillPath, "utf-8");
+  return { content, skillPath };
 }
 
 export default function (pi: ExtensionAPI) {
@@ -28,8 +29,11 @@ export default function (pi: ExtensionAPI) {
     pi.registerCommand(skill.name, {
       description: skill.description,
       handler: async (args, ctx) => {
-        const content = loadSkill(skill.name).replace(/\$ARGUMENTS/g, args ?? "");
-        await ctx.sendUserMessage(content);
+        const { content, skillPath } = loadSkill(skill.name);
+        const expanded = content
+          .replace(/SKILL_PATH/g, skillPath)
+          .replace(/\$ARGUMENTS/g, args ?? "");
+        ctx.sendUserMessage(expanded);
       },
     });
   }
