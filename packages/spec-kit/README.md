@@ -85,22 +85,23 @@ Convert the tasks in `tasks.md` into GitHub Issues on the repository's remote. R
 
 ## Artifacts
 
-Configuration and templates are stored under `.specify/` at your repo root. Feature artifacts are stored under `specs/` at your repo root:
+Configuration and templates are stored under `.specify/`. Feature artifacts are stored under `specs/`:
 
 | Path | Description |
 |---|---|
 | `.specify/memory/constitution.md` | Project principles that govern all specs |
-| `specs/<branch>/spec.md` | Feature specification |
-| `specs/<branch>/plan.md` | Technical implementation plan |
-| `specs/<branch>/tasks.md` | Ordered implementation tasks |
 | `.specify/scripts/bash/` | Helper scripts used by the skills |
 | `.specify/templates/` | Source templates for all artifacts |
+| `specs/<branch>/plan.md` | Technical implementation plan |
+| `specs/<branch>/spec.md` | Feature specification |
+| `specs/<branch>/tasks.md` | Ordered implementation tasks |
 
 ## Hooks
 
 `.specify/hooks.yml` lets you customize the shell-level operations that the workflow scripts perform at key points. It ships with three built-in hooks:
 
 All hooks are optional. If `hooks.yml` is missing entirely, or a hook has no commands defined, the scripts silently skip it and continue.
+
 | Hook | When it runs | Default command |
 |---|---|---|
 | `fetch_remotes` | Before auto-numbering a new feature branch | `git fetch --all --prune` |
@@ -126,6 +127,7 @@ hooks:
 ```
 
 To add extra steps, append more commands under the relevant hook. To disable a hook, remove or comment out its commands.
+
 ## License
 
 MIT
