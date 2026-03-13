@@ -1,0 +1,27 @@
+# .specify/hooks.yml
+#
+# Git (and other) hooks for the specify workflow.
+#
+# Each hook is a named list of shell commands that scripts run at specific
+# points in the workflow. To disable a hook entirely, remove its commands
+# or comment them out. To add extra steps (e.g. push, notify), append more
+# commands under the relevant hook.
+#
+# Template variables: use {{variable_name}} in any command string and the
+# corresponding key=value argument passed by the script will be substituted.
+
+hooks:
+  # Fetch all remotes so that branch listings are up-to-date before
+  # auto-numbering a new feature branch.
+  fetch_remotes:
+    - git fetch --all --prune
+
+  # List branches for auto-numbering. The output of this hook is captured
+  # and parsed; each line should be one branch name (git branch -a format).
+  list_branches:
+    - git branch -a
+
+  # Create the feature branch after a new feature is initialised.
+  # {{branch_name}} is replaced with the computed branch name, e.g. 003-user-auth.
+  create_branch:
+    - git checkout -b "{{branch_name}}"
