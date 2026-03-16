@@ -1,0 +1,21 @@
+{
+  "name": "pi-cap-router",
+  "version": "0.1.0",
+  "description": "Route tasks to Pi agents based on capability",
+  "main": "index.ts",
+  "scripts": {
+    "test": "node --experimental-transform-types index.test.ts"
+  },
+  "keywords": [
+    "pi-package",
+    "capability",
+    "pi",
+    "agent"
+  ],
+  "author": "Josh Mock <josh@joshmock.com>",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "^0.58.3"
+  }
+}
