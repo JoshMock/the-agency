@@ -1,0 +1,41 @@
+{
+  "name": "@the-agency/pi-task-tree",
+  "version": "0.1.0",
+  "description": "DAG-based task management system that orchestrates Pi agents",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "test": "npm run lint && node --experimental-transform-types --test index.test.ts yaml-dsl.test.ts"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi",
+    "pi-package",
+    "dag",
+    "task management",
+    "orchestration"
+  ],
+  "author": "Josh Mock <josh@joshmock.com>",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "yaml": "^2.8.2"
+  }
+}
