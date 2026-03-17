@@ -1,0 +1,35 @@
+{
+  "name": "@the-agency/pi-return-type",
+  "version": "0.1.0",
+  "description": "Pi extension that lets the agent return structured data as a typed value instead of writing to disk.",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "test": "npm run lint && node --experimental-transform-types --test index.test.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "*.ts",
+    "!*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi",
+    "pi-package",
+    "agents",
+    "llm",
+    "structured-output",
+    "return-value"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "license": "MIT"
+}
