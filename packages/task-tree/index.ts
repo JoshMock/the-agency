@@ -143,3 +143,39 @@ export class TaskManager {
 }
 
 export { parseTaskTree, type TaskSpec, type TaskSpecFactory, type ThinkingLevel } from './yaml-dsl.ts'
+
+/**
+ * called when a {@link PauseNode} is reached during execution.
+ *
+ * receives the pause task's name and optional human-readable message.
+ * the returned promise must resolve before downstream tasks are allowed to run.
+ */
+export type PauseHandler = (context: { name: string; message?: string }) => Promise<void>
+
+/**
+ * a checkpoint node that halts downstream execution until a human approves.
+ *
+ * when reached during {@link TaskManager.runAll}, this node calls the supplied
+ * {@link PauseHandler} and waits for it to resolve before unblocking its dependents.
+ * use it to inject review gates between phases of a task tree.
+ */
+export class PauseNode extends TaskNode {
+  /** optional human-readable description shown to the reviewer */
+  message: string | undefined
+
+  /**
+   * @param name    - unique identifier (same rules as {@link TaskNode})
+   * @param handler - async callback invoked when this node runs; resolves to approve
+   * @param message - optional description of what to review
+   * @param deps    - nodes that must finish before this checkpoint runs
+   */
+  constructor (
+    name: string,
+    handler: PauseHandler,
+    message?: string,
+    deps: TaskNode[] = [],
+  ) {
+    super(name, () => handler({ name, message }), deps)
+    this.message = message
+  }
+}

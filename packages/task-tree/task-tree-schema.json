@@ -1,0 +1,141 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Task Tree YAML DSL",
+  "description": "Schema for pi-task-tree YAML task graph definitions",
+  "type": "object",
+  "required": ["tasks"],
+  "additionalProperties": false,
+  "properties": {
+    "tasks": {
+      "type": "array",
+      "description": "Root-level tasks in the task graph",
+      "items": {
+        "$ref": "#/definitions/TaskSpec"
+      },
+      "minItems": 1
+    }
+  },
+  "definitions": {
+    "ModelSpec": {
+      "oneOf": [
+        {
+          "type": "string",
+          "pattern": "^[^/]+/[^/]+$",
+          "description": "Model reference as 'provider/name' (e.g., 'anthropic/claude-opus-4-5')"
+        },
+        {
+          "type": "object",
+          "required": ["provider", "name"],
+          "additionalProperties": false,
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "Model provider (e.g., 'anthropic', 'openai')",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "description": "Model name (e.g., 'claude-opus-4-5', 'gpt-4o')",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "ThinkingLevel": {
+      "type": "string",
+      "enum": ["none", "low", "medium", "high"],
+      "default": "none",
+      "description": "Level of extended thinking to apply to the task"
+    },
+    "RegularTaskSpec": {
+      "type": "object",
+      "required": ["name", "prompt"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for this task within the task tree",
+          "minLength": 1
+        },
+        "prompt": {
+          "type": "array",
+          "description": "Instructions for the agent, as an array of strings",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "model": {
+          "$ref": "#/definitions/ModelSpec",
+          "description": "Optional model to use for this task"
+        },
+        "thinking": {
+          "$ref": "#/definitions/ThinkingLevel"
+        },
+        "tasks": {
+          "type": "array",
+          "description": "Sub-tasks that automatically depend on their parent task",
+          "items": {
+            "$ref": "#/definitions/TaskSpec"
+          }
+        },
+        "depends_on": {
+          "type": "array",
+          "description": "Explicit dependencies on other tasks by name (cross-sibling or any nesting depth)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "pause": {
+          "const": false,
+          "description": "Explicitly mark this as a regular (non-pause) task"
+        }
+      }
+    },
+    "PauseTaskSpec": {
+      "type": "object",
+      "required": ["name", "pause"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Unique identifier for this pause checkpoint",
+          "minLength": 1
+        },
+        "pause": {
+          "const": true,
+          "description": "Mark this as a pause checkpoint task"
+        },
+        "message": {
+          "type": "string",
+          "description": "Human-readable description of what to review or approve at this checkpoint"
+        },
+        "depends_on": {
+          "type": "array",
+          "description": "Explicit dependencies on other tasks by name",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tasks": {
+          "type": "array",
+          "description": "Sub-tasks that automatically depend on this pause checkpoint",
+          "items": {
+            "$ref": "#/definitions/TaskSpec"
+          }
+        }
+      }
+    },
+    "TaskSpec": {
+      "oneOf": [
+        {
+          "$ref": "#/definitions/RegularTaskSpec"
+        },
+        {
+          "$ref": "#/definitions/PauseTaskSpec"
+        }
+      ]
+    }
+  }
+}

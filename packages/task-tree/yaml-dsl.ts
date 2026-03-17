@@ -1,6 +1,6 @@
 import { parse } from 'yaml'
 
-import { type AgentContext, type TaskFunc, TaskManager, TaskNode } from './index.ts'
+import { type TaskFunc, TaskManager, TaskNode, PauseNode, type PauseHandler } from './index.ts'
 
 export type ThinkingLevel = 'none' | 'low' | 'medium' | 'high'
 
@@ -10,8 +10,8 @@ export interface ModelSpec {
   name: string
 }
 
-/** a single task entry in the YAML DSL */
-export interface TaskSpec {
+/** a regular (agent-driven) task entry in the YAML DSL */
+export interface RegularTaskSpec {
   name: string
   prompt: string[]
   /** provider/name string ("anthropic/claude-opus-4-5") or {provider, name} object */
@@ -21,7 +21,27 @@ export interface TaskSpec {
   tasks?: TaskSpec[]
   /** explicit dependencies on other tasks by name */
   depends_on?: string[]
+  pause?: false
 }
+
+/**
+ * a pause/checkpoint task entry in the YAML DSL.
+ *
+ * when reached during execution, halts all downstream tasks until the
+ * `onPause` handler supplied to {@link parseTaskTree} resolves.
+ */
+export interface PauseTaskSpec {
+  name: string
+  pause: true
+  /** optional human-readable description of what to review */
+  message?: string
+  /** explicit dependencies on other tasks by name */
+  depends_on?: string[]
+  tasks?: TaskSpec[]
+}
+
+/** a single task entry in the YAML DSL — either a regular task or a pause checkpoint */
+export type TaskSpec = RegularTaskSpec | PauseTaskSpec
 
 /** top-level shape of a task tree YAML document */
 interface TaskTreeDoc {
@@ -62,6 +82,19 @@ export interface LeafTaskSpec {
  * the Pi model object.
  */
 export type TaskSpecFactory = (spec: LeafTaskSpec) => TaskFunc
+
+/** options for {@link parseTaskTree} */
+export interface ParseTaskTreeOptions {
+  /**
+   * called whenever a pause checkpoint is reached during execution.
+   *
+   * the returned promise must resolve before any downstream tasks are allowed
+   * to run. if omitted and the task tree contains a pause node, `parseTaskTree`
+   * throws synchronously.
+   */
+  onPause?: PauseHandler
+}
+
 // ─── internal helpers ────────────────────────────────────────────────────────
 
 interface FlatEntry {
@@ -90,6 +123,10 @@ function validateDoc (doc: unknown): asserts doc is TaskTreeDoc {
   }
 }
 
+function isPauseSpec (spec: TaskSpec): spec is PauseTaskSpec {
+  return (spec as PauseTaskSpec).pause === true
+}
+
 // ─── public API ──────────────────────────────────────────────────────────────
 
 /**
@@ -112,9 +149,14 @@ function validateDoc (doc: unknown): asserts doc is TaskTreeDoc {
  *         prompt:
  *           - "Summarize the clean data"
  *         depends_on: [clean]     # cross-sibling dependency
+ *   - name: review-checkpoint
+ *     pause: true                 # halts execution until onPause resolves
+ *     message: "Review the cleaned data before reporting"
+ *     depends_on: [summarize]
  *   - name: report
  *     prompt:
  *       - "Write a report"
+ *     depends_on: [review-checkpoint]
  * ```
  *
  * ### dependency rules
@@ -125,13 +167,12 @@ function validateDoc (doc: unknown): asserts doc is TaskTreeDoc {
  * @param yamlString - raw YAML source
  * @param factory    - converts a leaf spec into the async {@link TaskFunc} that
  *                     will be executed at runtime
- * @param agent      - optional {@link AgentContext} embedded into every task
- *                     function via the factory (caller may ignore it)
+ * @param options    - optional config; supply `onPause` to handle pause checkpoints
  */
 export function parseTaskTree (
   yamlString: string,
   factory: TaskSpecFactory,
-  _agent?: AgentContext
+  options: ParseTaskTreeOptions = {}
 ): TaskManager {
   const doc = parse(yamlString) as unknown
   validateDoc(doc)
@@ -160,11 +201,22 @@ export function parseTaskTree (
     }
   }
 
+  // validate that pause nodes have an onPause handler
+  for (const { spec } of flat) {
+    if (isPauseSpec(spec) && options.onPause == null) {
+      throw new Error(
+        `task "${spec.name}" is a pause checkpoint but no onPause handler was provided to parseTaskTree`
+      )
+    }
+  }
+
   // validate model specs
   for (const { spec } of flat) {
-    if (spec.model == null) continue
+    if (isPauseSpec(spec)) continue
+    const s = spec as RegularTaskSpec
+    if (s.model == null) continue
     try {
-      parseModelSpec(spec.model)
+      parseModelSpec(s.model)
     } catch {
       throw new Error(
         `task "${spec.name}": model must be a "provider/name" string or {provider, name} object`
@@ -175,12 +227,17 @@ export function parseTaskTree (
   // first pass: create all nodes (deps wired in second pass)
   const nodeMap = new Map<string, TaskNode>()
   for (const { spec } of flat) {
-    const { tasks: _tasks, depends_on: _deps, model, ...rest } = spec
-    const leafSpec: LeafTaskSpec = {
-      ...rest,
-      ...(model != null ? { model: parseModelSpec(model) } : {}),
+    if (isPauseSpec(spec)) {
+      nodeMap.set(spec.name, new PauseNode(spec.name, options.onPause!, spec.message))
+    } else {
+      const rs = spec as RegularTaskSpec
+      const { tasks: _tasks, depends_on: _deps, model, pause: _pause, ...rest } = rs as RegularTaskSpec & { pause?: false }
+      const leafSpec: LeafTaskSpec = {
+        ...rest,
+        ...(model != null ? { model: parseModelSpec(model) } : {}),
+      }
+      nodeMap.set(spec.name, new TaskNode(spec.name, factory(leafSpec)))
     }
-    nodeMap.set(spec.name, new TaskNode(spec.name, factory(leafSpec)))
   }
 
   // second pass: wire dependencies

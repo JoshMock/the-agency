@@ -6,6 +6,7 @@ import {
   parseModelSpec,
   type LeafTaskSpec,
   type TaskSpecFactory,
+  type PauseHandler,
 } from './yaml-dsl.ts'
 
 const mockAgent = { provider: 'mock' }
@@ -330,5 +331,111 @@ describe('parseModelSpec', () => {
 
   it('throws on a string with multiple slashes', () => {
     assert.throws(() => parseModelSpec('a/b/c'), /provider\/name/)
+  })
+})
+
+describe('pause tasks', () => {
+  it('calls onPause with name and message, then unblocks downstream tasks', async () => {
+    const paused: Array<{ name: string; message?: string }> = []
+    const order: string[] = []
+    const factory: TaskSpecFactory = (spec) => async () => { order.push(spec.name) }
+    const onPause: PauseHandler = async (ctx) => {
+      paused.push(ctx)
+      order.push(`pause:${ctx.name}`)
+    }
+
+    const manager = parseTaskTree(`
+tasks:
+  - name: before
+    prompt: ["Before"]
+  - name: gate
+    pause: true
+    message: "Review before continuing"
+    depends_on: [before]
+  - name: after
+    prompt: ["After"]
+    depends_on: [gate]
+`, factory, { onPause })
+
+    await manager.runAll(mockAgent)
+    assert.equal(order.indexOf('before') < order.indexOf('pause:gate'), true, 'gate must run after before')
+    assert.equal(order.indexOf('pause:gate') < order.indexOf('after'), true, 'after must run after gate')
+    assert.deepEqual(paused, [{ name: 'gate', message: 'Review before continuing' }])
+  })
+
+  it('pause without message passes undefined as message', async () => {
+    const paused: Array<{ name: string; message?: string }> = []
+    const onPause: PauseHandler = async (ctx) => { paused.push(ctx) }
+
+    const manager = parseTaskTree(`
+tasks:
+  - name: gate
+    pause: true
+`, noop, { onPause })
+
+    await manager.runAll(mockAgent)
+    assert.deepEqual(paused, [{ name: 'gate', message: undefined }])
+  })
+
+  it('pause node acts as a dependency barrier for multiple downstream tasks', async () => {
+    const order: string[] = []
+    const factory: TaskSpecFactory = (spec) => async () => { order.push(spec.name) }
+    const onPause: PauseHandler = async (ctx) => { order.push(`pause:${ctx.name}`) }
+
+    const manager = parseTaskTree(`
+tasks:
+  - name: before
+    prompt: ["Before"]
+  - name: gate
+    pause: true
+    depends_on: [before]
+  - name: after1
+    prompt: ["After 1"]
+    depends_on: [gate]
+  - name: after2
+    prompt: ["After 2"]
+    depends_on: [gate]
+`, factory, { onPause })
+
+    await manager.runAll(mockAgent)
+    assert.ok(order.indexOf('before') < order.indexOf('pause:gate'), 'gate after before')
+    assert.ok(order.indexOf('pause:gate') < order.indexOf('after1'), 'after1 after gate')
+    assert.ok(order.indexOf('pause:gate') < order.indexOf('after2'), 'after2 after gate')
+  })
+
+  it('throws at parse time if no onPause handler is provided for a pause task', () => {
+    assert.throws(
+      () => parseTaskTree(`
+tasks:
+  - name: gate
+    pause: true
+`, noop),
+      /pause checkpoint.*onPause/
+    )
+  })
+
+  it('pause task can depend on sibling tasks via depends_on', async () => {
+    const order: string[] = []
+    const factory: TaskSpecFactory = (spec) => async () => { order.push(spec.name) }
+    const onPause: PauseHandler = async () => { order.push('gate') }
+
+    const manager = parseTaskTree(`
+tasks:
+  - name: a
+    prompt: ["A"]
+  - name: b
+    prompt: ["B"]
+  - name: gate
+    pause: true
+    depends_on: [a, b]
+  - name: c
+    prompt: ["C"]
+    depends_on: [gate]
+`, factory, { onPause })
+
+    await manager.runAll(mockAgent)
+    assert.ok(order.indexOf('gate') > order.indexOf('a'), 'gate after a')
+    assert.ok(order.indexOf('gate') > order.indexOf('b'), 'gate after b')
+    assert.ok(order.indexOf('c') > order.indexOf('gate'), 'c after gate')
   })
 })

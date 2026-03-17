@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { TaskNode, TaskManager } from './index.ts'
+import { TaskNode, TaskManager, PauseNode } from './index.ts'
 
 const mockAgent = { provider: 'mock', model: 'noop' }
 
@@ -181,5 +181,54 @@ describe('TaskManager', () => {
     const manager = new TaskManager()
     manager.addTask(new TaskNode('bad', async () => { throw new Error('fail') }))
     await assert.rejects(() => manager.runAll(mockAgent), /fail/)
+  })
+})
+
+describe('PauseNode', () => {
+  it('calls the handler with name and message, then sets status to done', async () => {
+    const calls: Array<{ name: string; message?: string }> = []
+    const node = new PauseNode('gate', async (ctx) => { calls.push(ctx) }, 'please review')
+    await node.run(mockAgent)
+    assert.equal(node.status, 'done')
+    assert.deepEqual(calls, [{ name: 'gate', message: 'please review' }])
+  })
+
+  it('works without a message', async () => {
+    const calls: Array<{ name: string; message?: string }> = []
+    const node = new PauseNode('gate', async (ctx) => { calls.push(ctx) })
+    await node.run(mockAgent)
+    assert.deepEqual(calls, [{ name: 'gate', message: undefined }])
+  })
+
+  it('blocks dependent tasks until the handler resolves', async () => {
+    let resolveGate!: () => void
+    const gatePromise = new Promise<void>(resolve => { resolveGate = resolve })
+    const order: string[] = []
+
+    const gate = new PauseNode('gate', async () => {
+      await gatePromise
+      order.push('gate')
+    })
+    const after = new TaskNode('after', async () => { order.push('after') }, [gate])
+
+    const manager = new TaskManager()
+    manager.addTask(gate)
+    manager.addTask(after)
+
+    const runPromise = manager.runAll(mockAgent)
+    // give the event loop a tick — 'after' must not have run yet
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert.deepEqual(order, [], 'after should not run before gate resolves')
+
+    resolveGate()
+    await runPromise
+    assert.deepEqual(order, ['gate', 'after'])
+  })
+
+  it('sets status to failed and rethrows when handler throws', async () => {
+    const err = new Error('rejected')
+    const node = new PauseNode('gate', async () => { throw err })
+    await assert.rejects(() => node.run(mockAgent), err)
+    assert.equal(node.status, 'failed')
   })
 })

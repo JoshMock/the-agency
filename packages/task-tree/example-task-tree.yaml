@@ -1,0 +1,40 @@
+# $schema: ./task-tree-schema.json
+# Example task tree showing the YAML DSL format with schema validation
+tasks:
+  - name: research
+    prompt:
+      - "Research the current state of WebAssembly in 2025"
+      - "Focus on performance improvements and tooling"
+    model: anthropic/claude-opus-4-5
+    thinking: high
+
+  - name: write
+    prompt:
+      - "Write a 400-word blog post based on the research findings"
+      - "Make it engaging for a technical audience"
+    model: openai/gpt-4o
+    thinking: medium
+    depends_on: [research]
+
+  - name: review
+    prompt:
+      - "Review the blog post for clarity, accuracy, and engagement"
+      - "Provide specific feedback on improvements"
+    depends_on: [write]
+
+  - name: human-review
+    pause: true
+    message: "Review the blog post and feedback. Approve or request changes."
+    depends_on: [review]
+
+  - name: revise
+    prompt:
+      - "Incorporate the reviewer's feedback"
+      - "Polish the final version"
+    depends_on: [human-review]
+
+  - name: publish
+    prompt:
+      - "Publish the final blog post"
+      - "Share on relevant channels"
+    depends_on: [revise]
