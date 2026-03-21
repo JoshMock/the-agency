@@ -1,0 +1,40 @@
+{
+  "name": "@the-agency/pi-observability",
+  "version": "0.1.0",
+  "description": "Observability extension for Pi: tracks tool usage, tokens, models, skills, and sessions as JSONL timeseries data ready for Elasticsearch.",
+  "type": "module",
+  "main": "index.ts",
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "test": "node --experimental-transform-types --test index.test.ts"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "*.ts",
+    "!*.test.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "pi",
+    "pi-package",
+    "observability",
+    "elasticsearch",
+    "metrics",
+    "telemetry",
+    "agents",
+    "llm"
+  ],
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "*"
+  },
+  "license": "MIT"
+}
