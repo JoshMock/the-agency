@@ -308,29 +308,28 @@ create_new_agent_file() {
     # Escape special characters for sed by using a different delimiter or escaping
     local escaped_lang=$(printf '%s\n' "$NEW_LANG" | sed 's/[\[\.*^$()+{}|]/\\&/g')
     local escaped_framework=$(printf '%s\n' "$NEW_FRAMEWORK" | sed 's/[\[\.*^$()+{}|]/\\&/g')
-    local escaped_branch=$(printf '%s\n' "$CURRENT_BRANCH" | sed 's/[\[\.*^$()+{}|]/\\&/g')
     
     # Build technology stack and recent change strings conditionally
     local tech_stack
     if [[ -n "$escaped_lang" && -n "$escaped_framework" ]]; then
-        tech_stack="- $escaped_lang + $escaped_framework ($escaped_branch)"
+        tech_stack="- $escaped_lang + $escaped_framework"
     elif [[ -n "$escaped_lang" ]]; then
-        tech_stack="- $escaped_lang ($escaped_branch)"
+        tech_stack="- $escaped_lang"
     elif [[ -n "$escaped_framework" ]]; then
-        tech_stack="- $escaped_framework ($escaped_branch)"
+        tech_stack="- $escaped_framework"
     else
-        tech_stack="- ($escaped_branch)"
+        tech_stack="-"
     fi
 
     local recent_change
     if [[ -n "$escaped_lang" && -n "$escaped_framework" ]]; then
-        recent_change="- $escaped_branch: Added $escaped_lang + $escaped_framework"
+        recent_change="Added $escaped_lang + $escaped_framework"
     elif [[ -n "$escaped_lang" ]]; then
-        recent_change="- $escaped_branch: Added $escaped_lang"
+        recent_change="Added $escaped_lang"
     elif [[ -n "$escaped_framework" ]]; then
-        recent_change="- $escaped_branch: Added $escaped_framework"
+        recent_change="Added $escaped_framework"
     else
-        recent_change="- $escaped_branch: Added"
+        recent_change="Updated"
     fi
 
     local substitutions=(
@@ -393,18 +392,18 @@ update_existing_agent_file() {
     
     # Prepare new technology entries
     if [[ -n "$tech_stack" ]] && ! grep -q "$tech_stack" "$target_file"; then
-        new_tech_entries+=("- $tech_stack ($CURRENT_BRANCH)")
+        new_tech_entries+=("- $tech_stack")
     fi
     
     if [[ -n "$NEW_DB" ]] && [[ "$NEW_DB" != "N/A" ]] && [[ "$NEW_DB" != "NEEDS CLARIFICATION" ]] && ! grep -q "$NEW_DB" "$target_file"; then
-        new_tech_entries+=("- $NEW_DB ($CURRENT_BRANCH)")
+        new_tech_entries+=("- $NEW_DB")
     fi
     
     # Prepare new change entry
     if [[ -n "$tech_stack" ]]; then
-        new_change_entry="- $CURRENT_BRANCH: Added $tech_stack"
+        new_change_entry="Added $tech_stack"
     elif [[ -n "$NEW_DB" ]] && [[ "$NEW_DB" != "N/A" ]] && [[ "$NEW_DB" != "NEEDS CLARIFICATION" ]]; then
-        new_change_entry="- $CURRENT_BRANCH: Added $NEW_DB"
+        new_change_entry="Added $NEW_DB"
     fi
     
     # Check if sections exist in the file

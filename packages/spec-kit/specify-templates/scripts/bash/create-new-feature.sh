@@ -95,7 +95,6 @@ get_highest_from_specs() {
     echo "$highest"
 }
 
-# Function to get highest number from git branches
 # Function to get highest number from branches via the list_branches hook
 get_highest_from_branches() {
     local highest=0
@@ -212,7 +211,7 @@ generate_branch_name() {
     fi
 }
 
-# Generate branch name
+# Generate short name component
 if [ -n "$SHORT_NAME" ]; then
     # Use provided short name, just clean it up
     BRANCH_SUFFIX=$(clean_branch_name "$SHORT_NAME")
@@ -221,8 +220,7 @@ else
     BRANCH_SUFFIX=$(generate_branch_name "$FEATURE_DESCRIPTION")
 fi
 
-# Determine branch number
-# Determine branch number
+# Determine feature number
 if [ -z "$BRANCH_NUMBER" ]; then
     # check_existing_branches uses the list_branches and fetch_remotes hooks;
     # falls back to specs-only numbering when those hooks produce no output
@@ -231,39 +229,46 @@ fi
 
 # Force base-10 interpretation to prevent octal conversion (e.g., 010 → 8 in octal, but should be 10 in decimal)
 FEATURE_NUM=$(printf "%03d" "$((10#$BRANCH_NUMBER))")
-BRANCH_NAME="${FEATURE_NUM}-${BRANCH_SUFFIX}"
 
-# GitHub enforces a 244-byte limit on branch names
-# Validate and truncate if necessary
-MAX_BRANCH_LENGTH=244
-if [ ${#BRANCH_NAME} -gt $MAX_BRANCH_LENGTH ]; then
-    # Calculate how much we need to trim from suffix
-    # Account for: feature number (3) + hyphen (1) = 4 chars
-    MAX_SUFFIX_LENGTH=$((MAX_BRANCH_LENGTH - 4))
-    
-    # Truncate suffix at word boundary if possible
-    TRUNCATED_SUFFIX=$(echo "$BRANCH_SUFFIX" | cut -c1-$MAX_SUFFIX_LENGTH)
-    # Remove trailing hyphen if truncation created one
-    TRUNCATED_SUFFIX=$(echo "$TRUNCATED_SUFFIX" | sed 's/-$//')
-    
-    ORIGINAL_BRANCH_NAME="$BRANCH_NAME"
-    BRANCH_NAME="${FEATURE_NUM}-${TRUNCATED_SUFFIX}"
-    
-    >&2 echo "[specify] Warning: Branch name exceeded GitHub's 244-byte limit"
-    >&2 echo "[specify] Original: $ORIGINAL_BRANCH_NAME (${#ORIGINAL_BRANCH_NAME} bytes)"
-    >&2 echo "[specify] Truncated to: $BRANCH_NAME (${#BRANCH_NAME} bytes)"
+# Use the format_feature_id hook to create the feature identifier.
+# This allows different VCS systems to format the identifier differently.
+# Default hook formats as: NNN-short-name
+FEATURE_ID=$(run_hook format_feature_id "feature_num=$FEATURE_NUM" "short_name=$BRANCH_SUFFIX")
+
+# Validate GitHub's 244-byte branch name limit (if using git branches)
+if hook_defined create_branch; then
+    MAX_BRANCH_LENGTH=244
+    if [ ${#FEATURE_ID} -gt $MAX_BRANCH_LENGTH ]; then
+        # Calculate how much we need to trim from suffix
+        # Account for: feature number (3) + hyphen (1) = 4 chars
+        MAX_SUFFIX_LENGTH=$((MAX_BRANCH_LENGTH - 4))
+        
+        # Truncate suffix at word boundary if possible
+        TRUNCATED_SUFFIX=$(echo "$BRANCH_SUFFIX" | cut -c1-$MAX_SUFFIX_LENGTH)
+        # Remove trailing hyphen if truncation created one
+        TRUNCATED_SUFFIX=$(echo "$TRUNCATED_SUFFIX" | sed 's/-$//')
+        
+        ORIGINAL_FEATURE_ID="$FEATURE_ID"
+        FEATURE_ID=$(run_hook format_feature_id "feature_num=$FEATURE_NUM" "short_name=$TRUNCATED_SUFFIX")
+        
+        >&2 echo "[specify] Warning: Feature identifier exceeded GitHub's 244-byte limit"
+        >&2 echo "[specify] Original: $ORIGINAL_FEATURE_ID (${#ORIGINAL_FEATURE_ID} bytes)"
+        >&2 echo "[specify] Truncated to: $FEATURE_ID (${#FEATURE_ID} bytes)"
+    fi
 fi
 
+# Create the branch using the hook (if defined)
 if hook_defined create_branch; then
-    if ! run_hook create_branch "branch_name=$BRANCH_NAME"; then
-        >&2 echo "Error: create_branch hook failed for '$BRANCH_NAME'. Check .specify/hooks.yml."
+    if ! run_hook create_branch "branch_name=$FEATURE_ID"; then
+        >&2 echo "Error: create_branch hook failed for '$FEATURE_ID'. Check .specify/hooks.yml."
         exit 1
     fi
 else
-    >&2 echo "[specify] Warning: No create_branch hook defined; skipped branch creation for $BRANCH_NAME"
+    >&2 echo "[specify] Warning: No create_branch hook defined; skipped branch creation for $FEATURE_ID"
 fi
 
-FEATURE_DIR="$SPECS_DIR/$BRANCH_NAME"
+# Create feature directory using the hook
+FEATURE_DIR=$(run_hook get_feature_dir "repo_root=$REPO_ROOT" "feature_id=$FEATURE_ID")
 mkdir -p "$FEATURE_DIR"
 
 TEMPLATE="$REPO_ROOT/.specify/templates/spec-template.md"
@@ -271,13 +276,13 @@ SPEC_FILE="$FEATURE_DIR/spec.md"
 if [ -f "$TEMPLATE" ]; then cp "$TEMPLATE" "$SPEC_FILE"; else touch "$SPEC_FILE"; fi
 
 # Set the SPECIFY_FEATURE environment variable for the current session
-export SPECIFY_FEATURE="$BRANCH_NAME"
+export SPECIFY_FEATURE="$FEATURE_ID"
 
 if $JSON_MODE; then
-    printf '{"BRANCH_NAME":"%s","SPEC_FILE":"%s","FEATURE_NUM":"%s"}\n' "$BRANCH_NAME" "$SPEC_FILE" "$FEATURE_NUM"
+    printf '{"BRANCH_NAME":"%s","SPEC_FILE":"%s","FEATURE_NUM":"%s"}\n' "$FEATURE_ID" "$SPEC_FILE" "$FEATURE_NUM"
 else
-    echo "BRANCH_NAME: $BRANCH_NAME"
+    echo "BRANCH_NAME: $FEATURE_ID"
     echo "SPEC_FILE: $SPEC_FILE"
     echo "FEATURE_NUM: $FEATURE_NUM"
-    echo "SPECIFY_FEATURE environment variable set to: $BRANCH_NAME"
+    echo "SPECIFY_FEATURE environment variable set to: $FEATURE_ID"
 fi
