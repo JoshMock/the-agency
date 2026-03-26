@@ -98,7 +98,7 @@ Configuration and templates are stored under `.specify/`. Feature artifacts are 
 
 ## Hooks
 
-`.specify/hooks.yml` lets you customize the shell-level operations that the workflow scripts perform at key points. It ships with three built-in hooks:
+`.specify/hooks.yml` lets you customize the shell-level operations that the workflow scripts perform at key points. It ships with seven built-in hooks:
 
 All hooks are optional. If `hooks.yml` is missing entirely, or a hook has no commands defined, the scripts silently skip it and continue.
 
@@ -107,6 +107,10 @@ All hooks are optional. If `hooks.yml` is missing entirely, or a hook has no com
 | `fetch_remotes` | Before auto-numbering a new feature branch | `git fetch --all --prune` |
 | `list_branches` | To enumerate existing branches for auto-numbering | `git branch -a` |
 | `create_branch` | After a new feature is initialized | `git checkout -b "{{branch_name}}"` |
+| `get_current_feature` | To determine the active feature identifier | `git rev-parse --abbrev-ref HEAD` |
+| `verify_vcs_ready` | To confirm VCS is initialized before running scripts | `git rev-parse --show-toplevel` |
+| `format_feature_id` | To build a feature identifier from its components | `echo "{{feature_num}}-{{short_name}}"` |
+| `get_feature_dir` | To resolve the path to a feature's directory in `specs/` | `echo "{{repo_root}}/specs/{{feature_id}}"` |
 
 Each hook is a named list of shell commands. Use `{{variable_name}}` in a command string to interpolate values passed by the calling script (e.g. `{{branch_name}}` is replaced with the computed branch name like `003-user-auth`).
 
@@ -124,6 +128,28 @@ hooks:
   create_branch:
     - git checkout -b "{{branch_name}}"
     - git push -u origin "{{branch_name}}"  # optional: push immediately
+
+  # Get the active feature identifier (branch name by default).
+  # Override SPECIFY_FEATURE env var to use a fixed identifier.
+  get_current_feature:
+    - |
+      if [[ -n "${SPECIFY_FEATURE:-}" ]]; then
+        echo "$SPECIFY_FEATURE"
+      else
+        git rev-parse --abbrev-ref HEAD
+      fi
+
+  # Verify VCS is initialized; exit code 0 = ready, 1 = not ready.
+  verify_vcs_ready:
+    - git rev-parse --show-toplevel >/dev/null 2>&1
+
+  # Format a feature identifier from {{feature_num}} and {{short_name}}.
+  format_feature_id:
+    - echo "{{feature_num}}-{{short_name}}"
+
+  # Resolve the path to a feature's directory under specs/.
+  get_feature_dir:
+    - echo "{{repo_root}}/specs/{{feature_id}}"
 ```
 
 To add extra steps, append more commands under the relevant hook. To disable a hook, remove or comment out its commands.

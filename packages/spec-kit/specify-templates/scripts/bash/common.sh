@@ -12,54 +12,16 @@ get_repo_root() {
     fi
 }
 
-# Get current branch, with fallback for non-git repositories
+# Get current feature identifier via the get_current_feature hook.
+# The hook determines the identifier from VCS (e.g., git branch name) or environment.
 get_current_branch() {
-    # First check if SPECIFY_FEATURE environment variable is set
-    if [[ -n "${SPECIFY_FEATURE:-}" ]]; then
-        echo "$SPECIFY_FEATURE"
-        return
-    fi
-
-    # Then check git if available
-    if git rev-parse --abbrev-ref HEAD >/dev/null 2>&1; then
-        git rev-parse --abbrev-ref HEAD
-        return
-    fi
-
-    # For non-git repos, try to find the latest feature directory
-    local repo_root=$(get_repo_root)
-    local specs_dir="$repo_root/specs"
-
-    if [[ -d "$specs_dir" ]]; then
-        local latest_feature=""
-        local highest=0
-
-        for dir in "$specs_dir"/*; do
-            if [[ -d "$dir" ]]; then
-                local dirname=$(basename "$dir")
-                if [[ "$dirname" =~ ^([0-9]{3})- ]]; then
-                    local number=${BASH_REMATCH[1]}
-                    number=$((10#$number))
-                    if [[ "$number" -gt "$highest" ]]; then
-                        highest=$number
-                        latest_feature=$dirname
-                    fi
-                fi
-            fi
-        done
-
-        if [[ -n "$latest_feature" ]]; then
-            echo "$latest_feature"
-            return
-        fi
-    fi
-
-    echo "main"  # Final fallback
+    run_hook get_current_feature
 }
 
-# Check if we have git available
+# Check if VCS is available and ready via the verify_vcs_ready hook.
+# The hook validates that the VCS (git, etc.) is initialized and accessible.
 has_git() {
-    git rev-parse --show-toplevel >/dev/null 2>&1
+    run_hook verify_vcs_ready >/dev/null 2>&1
 }
 
 check_feature_branch() {
@@ -83,45 +45,19 @@ check_feature_branch() {
 
 get_feature_dir() { echo "$1/specs/$2"; }
 
-# Find feature directory by numeric prefix instead of exact branch match
-# This allows multiple branches to work on the same spec (e.g., 004-fix-bug, 004-add-feature)
+# Find feature directory using the get_feature_dir hook.
+# The hook constructs the directory path given the repo root and feature identifier.
+# This allows different VCS systems to use different naming conventions.
 find_feature_dir_by_prefix() {
     local repo_root="$1"
-    local branch_name="$2"
-    local specs_dir="$repo_root/specs"
-
-    # Extract numeric prefix from branch (e.g., "004" from "004-whatever")
-    if [[ ! "$branch_name" =~ ^([0-9]{3})- ]]; then
-        # If branch doesn't have numeric prefix, fall back to exact match
-        echo "$specs_dir/$branch_name"
-        return
-    fi
-
-    local prefix="${BASH_REMATCH[1]}"
-
-    # Search for directories in specs/ that start with this prefix
-    local matches=()
-    if [[ -d "$specs_dir" ]]; then
-        for dir in "$specs_dir"/"$prefix"-*; do
-            if [[ -d "$dir" ]]; then
-                matches+=("$(basename "$dir")")
-            fi
-        done
-    fi
-
-    # Handle results
-    if [[ ${#matches[@]} -eq 0 ]]; then
-        # No match found - return the branch name path (will fail later with clear error)
-        echo "$specs_dir/$branch_name"
-    elif [[ ${#matches[@]} -eq 1 ]]; then
-        # Exactly one match - perfect!
-        echo "$specs_dir/${matches[0]}"
-    else
-        # Multiple matches - this shouldn't happen with proper naming convention
-        echo "ERROR: Multiple spec directories found with prefix '$prefix': ${matches[*]}" >&2
-        echo "Please ensure only one spec directory exists per numeric prefix." >&2
-        echo "$specs_dir/$branch_name"  # Return something to avoid breaking the script
-    fi
+    local feature_id="$2"
+    
+    # Use the hook to get the feature directory path
+    local feature_dir
+    feature_dir=$(run_hook get_feature_dir "repo_root=$repo_root" "feature_id=$feature_id")
+    
+    # Return the computed path (may or may not exist yet)
+    echo "$feature_dir"
 }
 
 get_feature_paths() {
@@ -133,7 +69,7 @@ get_feature_paths() {
         has_git_repo="true"
     fi
 
-    # Use prefix-based lookup to support multiple branches per spec
+    # Use the hook to find feature directory
     local feature_dir=$(find_feature_dir_by_prefix "$repo_root" "$current_branch")
 
     cat <<EOF
@@ -151,7 +87,6 @@ CONTRACTS_DIR='$feature_dir/contracts'
 EOF
 }
 
-check_file() { [[ -f "$1" ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 check_file() { [[ -f "$1" ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 check_dir() { [[ -d "$1" && -n $(ls -A "$1" 2>/dev/null) ]] && echo "  ✓ $2" || echo "  ✗ $2"; }
 
@@ -215,4 +150,3 @@ run_hook() {
         eval "$cmd"
     done <<< "$cmds"
 }
-
