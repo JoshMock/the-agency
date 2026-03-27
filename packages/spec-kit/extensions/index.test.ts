@@ -6,25 +6,19 @@ type CommandHandler = (args: string | undefined, ctx: any) => Promise<void>
 
 function createMockPi () {
   const commands: Record<string, { description: string; handler: CommandHandler }> = {}
+  const messages: string[] = []
 
   return {
     pi: {
       registerCommand (name: string, config: { description: string; handler: CommandHandler }) {
         commands[name] = config
       },
+      sendUserMessage (msg: string) {
+        messages.push(msg)
+        return Promise.resolve()
+      },
     },
     commands,
-  }
-}
-
-function createMockCtx () {
-  const messages: string[] = []
-
-  return {
-    sendUserMessage (msg: string) {
-      messages.push(msg)
-      return Promise.resolve()
-    },
     messages,
   }
 }
@@ -69,46 +63,41 @@ describe('spec-kit extension', () => {
   })
 
   it('command handler sends the skill content as a user message', async () => {
-    const { pi, commands } = createMockPi()
+    const { pi, commands, messages } = createMockPi()
     initExtension(pi as any)
-    const ctx = createMockCtx()
 
-    await commands['speckit-init'].handler(undefined, ctx)
+    await commands['speckit-init'].handler(undefined, {})
 
-    assert.equal(ctx.messages.length, 1)
-    assert.ok(ctx.messages[0].length > 0)
+    assert.equal(messages.length, 1)
+    assert.ok(messages[0].length > 0)
   })
 
   it('command handler substitutes $ARGUMENTS in skill content', async () => {
-    const { pi, commands } = createMockPi()
+    const { pi, commands, messages } = createMockPi()
     initExtension(pi as any)
-    const ctx = createMockCtx()
 
-    await commands['speckit-specify'].handler('my feature', ctx)
+    await commands['speckit-specify'].handler('my feature', {})
 
-    assert.ok(!ctx.messages[0].includes('$ARGUMENTS'), 'expected $ARGUMENTS to be replaced')
-    assert.ok(ctx.messages[0].includes('my feature'), 'expected args to appear in message')
+    assert.ok(!messages[0].includes('$ARGUMENTS'), 'expected $ARGUMENTS to be replaced')
+    assert.ok(messages[0].includes('my feature'), 'expected args to appear in message')
   })
 
   it('command handler replaces all occurrences of $ARGUMENTS', async () => {
-    const { pi, commands } = createMockPi()
+    const { pi, commands, messages } = createMockPi()
     initExtension(pi as any)
-    const ctx = createMockCtx()
 
-    // use speckit-init which may or may not have $ARGUMENTS; test against a command we know works
-    await commands['speckit-specify'].handler('test-arg', ctx)
+    await commands['speckit-specify'].handler('test-arg', {})
 
-    const occurrences = (ctx.messages[0].match(/\$ARGUMENTS/g) ?? []).length
+    const occurrences = (messages[0].match(/\$ARGUMENTS/g) ?? []).length
     assert.equal(occurrences, 0)
   })
 
   it('command handler treats undefined args as empty string substitution', async () => {
-    const { pi, commands } = createMockPi()
+    const { pi, commands, messages } = createMockPi()
     initExtension(pi as any)
-    const ctx = createMockCtx()
 
-    await commands['speckit-specify'].handler(undefined, ctx)
+    await commands['speckit-specify'].handler(undefined, {})
 
-    assert.ok(!ctx.messages[0].includes('$ARGUMENTS'))
+    assert.ok(!messages[0].includes('$ARGUMENTS'))
   })
 })

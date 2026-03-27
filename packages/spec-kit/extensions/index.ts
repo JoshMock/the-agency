@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI) {
         const expanded = content
           .replace(/SKILL_PATH/g, skillPath)
           .replace(/\$ARGUMENTS/g, args ?? "");
-        ctx.sendUserMessage(expanded);
+        pi.sendUserMessage(expanded);
       },
     });
   }
