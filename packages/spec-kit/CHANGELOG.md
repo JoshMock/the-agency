@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.0...pi-spec-kit-v0.2.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* call sendUserMessage from correct context ([#29](https://github.com/JoshMock/the-agency/issues/29)) ([1c41338](https://github.com/JoshMock/the-agency/commit/1c4133890020fc8eba1d8776b608d1a20aaeaa79))
+
 ## [0.2.0](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.1.0...pi-spec-kit-v0.2.0) (2026-03-26)
 
 
