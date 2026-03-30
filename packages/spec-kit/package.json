@@ -10,7 +10,7 @@
     "agents"
   ],
   "scripts": {
-    "test": "node --experimental-transform-types --test extensions/index.test.ts"
+    "test": "node --experimental-transform-types --test extensions/index.test.ts && bash specify-templates/scripts/bash/common.test.sh"
   },
   "files": [
     "extensions/**",
