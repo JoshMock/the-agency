@@ -24,6 +24,9 @@
       "./extensions"
     ]
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   }
