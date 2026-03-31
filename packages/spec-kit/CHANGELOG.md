@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.3](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.2...pi-spec-kit-v0.2.3) (2026-03-31)
+
+
+### Bug Fixes
+
+* package.json for releasing ([#33](https://github.com/JoshMock/the-agency/issues/33)) ([a07adc5](https://github.com/JoshMock/the-agency/commit/a07adc54f20ec409b0c24a16800a3ac5c09bf085))
+
 ## [0.2.2](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.1...pi-spec-kit-v0.2.2) (2026-03-31)
 
 
