@@ -1,0 +1,40 @@
+{
+  "name": "@the-agency/agent-vm",
+  "version": "0.1.0",
+  "description": "Run pi sandboxed in a Firecracker microVM via vmsan — limited file access, 256 MiB RAM, 1 vCPU.",
+  "type": "module",
+  "bin": {
+    "vmpi": "./vmpi.ts"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --import tsx/esm --test *.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "pi",
+    "pi-package",
+    "sandbox",
+    "firecracker",
+    "vmsan",
+    "microvm"
+  ],
+  "author": "Josh Mock <josh@joshmock.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "os": [
+    "linux"
+  ],
+  "dependencies": {
+    "commander": "^14.0.3",
+    "cosmiconfig": "^9.0.1",
+    "vmsan": "^0.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.9",
+    "tsx": "^4.21.0",
+    "typescript": "^5.5.2"
+  }
+}
