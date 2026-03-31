@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.2](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.1...pi-spec-kit-v0.2.2) (2026-03-31)
+
+
+### Bug Fixes
+
+* multi-line hooks ([#31](https://github.com/JoshMock/the-agency/issues/31)) ([06d20b7](https://github.com/JoshMock/the-agency/commit/06d20b722ac17b8b01a33812df4cdf70e5eb2993))
+
 ## [0.2.1](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.0...pi-spec-kit-v0.2.1) (2026-03-27)
 
 
