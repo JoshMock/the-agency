@@ -60,6 +60,18 @@ const editItemSchema = Type.Object({
   lines: Type.Array(Type.String(), {
     description: 'New lines to insert or replace with (one string per line, no trailing newlines)',
   }),
+  // The hash in `pos` guards against staleness: it proves the file hasn't changed since the
+  // last read. `current` serves a different purpose — it guards against logical errors, where
+  // the agent has the correct hash for a line but has the wrong mental model of which line it
+  // is targeting. By requiring the agent to state what it expects the line to say, we catch
+  // the case where the right hash was copied from the wrong line in the hashline_read output.
+  current: Type.Optional(
+    Type.String({
+      description:
+        'For single-line replace ops: the exact current content of the line at pos. ' +
+        'Required when end is omitted. Must match the actual line exactly or the edit is rejected before any mutation occurs.',
+    })
+  ),
 })
 
 const hashlineEditSchema = Type.Object({
@@ -93,7 +105,13 @@ function parseEditItems (items: EditItem[]): HashlineEdit[] {
         }
         const pos = parseTag(item.pos)
         const end = item.end != null ? parseTag(item.end) : undefined
-        return { op: 'replace' as const, pos, end, lines: item.lines }
+        if (end == null && item.current == null) {
+          throw new Error('single-line replace requires a "current" value (the exact content of the line being replaced)')
+        }
+        if (end != null) {
+          return { op: 'replace' as const, pos, end, lines: item.lines }
+        }
+        return { op: 'replace' as const, pos, lines: item.lines, current: item.current! }
       }
       case 'append': {
         const pos = item.pos != null ? parseTag(item.pos) : undefined

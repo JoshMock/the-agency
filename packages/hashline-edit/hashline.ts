@@ -110,7 +110,8 @@ export interface Anchor {
 }
 
 export type HashlineEdit =
-  | { op: 'replace'; pos: Anchor; end?: Anchor; lines: string[] }
+  | { op: 'replace'; pos: Anchor; end?: undefined; lines: string[]; current: string }
+  | { op: 'replace'; pos: Anchor; end: Anchor; lines: string[] }
   | { op: 'append'; pos?: Anchor; lines: string[] }
   | { op: 'prepend'; pos?: Anchor; lines: string[] }
 
@@ -271,6 +272,7 @@ export function applyHashlineEdits (
 
   // pre-validate all hashes before mutating
   const mismatches: HashMismatch[] = []
+  const currentMismatches: Array<{ line: number; expected: string; actual: string }> = []
   function validateRef (ref: Anchor): boolean {
     if (ref.line < 1 || ref.line > fileLines.length) {
       throw new Error(
@@ -298,6 +300,12 @@ export function applyHashlineEdits (
         } else {
           if (!validateRef(edit.pos)) continue
         }
+        if (!edit.end) {
+          const actualLine = fileLines[edit.pos.line - 1]
+          if (actualLine !== edit.current) {
+            currentMismatches.push({ line: edit.pos.line, expected: edit.current, actual: actualLine })
+          }
+        }
         break
       }
       case 'append': {
@@ -315,6 +323,12 @@ export function applyHashlineEdits (
 
   if (mismatches.length > 0) {
     throw new HashlineMismatchError(mismatches, fileLines)
+  }
+  if (currentMismatches.length > 0) {
+    const details = currentMismatches.map(({ line, expected, actual }) =>
+      `  line ${line}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`
+    ).join('\n')
+    throw new Error(`Current content mismatch on ${currentMismatches.length} replace edit(s):\n${details}`)
   }
 
   // autocorrect escaped tabs

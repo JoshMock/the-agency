@@ -102,7 +102,7 @@ describe('applyHashlineEdits', () => {
   it('replaces a single line', () => {
     const text = 'aaa\nbbb\nccc'
     const result = applyHashlineEdits(text, [
-      { op: 'replace', pos: anchorFor(2, 'bbb'), lines: ['BBB'] },
+      { op: 'replace', pos: anchorFor(2, 'bbb'), lines: ['BBB'], current: 'bbb' },
     ])
     assert.equal(result.lines, 'aaa\nBBB\nccc')
     assert.equal(result.firstChangedLine, 2)
@@ -158,7 +158,7 @@ describe('applyHashlineEdits', () => {
     assert.throws(
       () =>
         applyHashlineEdits(text, [
-          { op: 'replace', pos: { line: 1, hash: 'XX' }, lines: ['new'] },
+          { op: 'replace', pos: { line: 1, hash: 'XX' }, lines: ['new'], current: 'aaa' },
         ]),
       (err: any) => err instanceof HashlineMismatchError
     )
@@ -167,7 +167,7 @@ describe('applyHashlineEdits', () => {
   it('detects no-op edits', () => {
     const text = 'aaa\nbbb'
     const result = applyHashlineEdits(text, [
-      { op: 'replace', pos: anchorFor(1, 'aaa'), lines: ['aaa'] },
+      { op: 'replace', pos: anchorFor(1, 'aaa'), lines: ['aaa'], current: 'aaa' },
     ])
     assert.equal(result.firstChangedLine, undefined)
     assert.equal(result.noopEdits?.length, 1)
@@ -177,9 +177,46 @@ describe('applyHashlineEdits', () => {
     assert.throws(
       () =>
         applyHashlineEdits('aaa', [
-          { op: 'replace', pos: { line: 5, hash: 'ZZ' }, lines: ['x'] },
+          { op: 'replace', pos: { line: 5, hash: 'ZZ' }, lines: ['x'], current: 'x' },
         ]),
       /does not exist/
     )
+  })
+
+  describe('current content check', () => {
+    it('succeeds when current matches the actual line', () => {
+      const text = 'aaa\nbbb\nccc'
+      const result = applyHashlineEdits(text, [
+        { op: 'replace', pos: anchorFor(2, 'bbb'), lines: ['BBB'], current: 'bbb' },
+      ])
+      assert.equal(result.lines, 'aaa\nBBB\nccc')
+    })
+
+    it('throws when current does not match the actual line', () => {
+      const text = 'aaa\nbbb\nccc'
+      assert.throws(
+        () => applyHashlineEdits(text, [
+          { op: 'replace', pos: anchorFor(2, 'bbb'), lines: ['BBB'], current: 'xxx' },
+        ]),
+        (err: any) => {
+          assert.ok(err instanceof Error)
+          assert.match(err.message, /current content mismatch/i)
+          assert.ok(err.message.includes('xxx'), 'includes expected value')
+          assert.ok(err.message.includes('bbb'), 'includes actual value')
+          return true
+        }
+      )
+    })
+
+    it('current mismatch is caught before any mutation', () => {
+      const text = 'aaa\nbbb\nccc'
+      assert.throws(
+        () => applyHashlineEdits(text, [
+          { op: 'replace', pos: anchorFor(1, 'aaa'), lines: ['AAA'] },
+          { op: 'replace', pos: anchorFor(2, 'bbb'), lines: ['BBB'], current: 'wrong' },
+        ]),
+        /current content mismatch/i
+      )
+    })
   })
 })
