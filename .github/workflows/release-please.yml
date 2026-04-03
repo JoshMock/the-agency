@@ -12,9 +12,9 @@ jobs:
   release-please:
     runs-on: ubuntu-latest
     outputs:
-      hashline-edit-release-created: ${{ steps.release.outputs['pi-hashline-edit--release_created'] }}
-      tokenshrink-release-created: ${{ steps.release.outputs['pi-tokenshrink--release_created'] }}
-      spec-kit-release-created: ${{ steps.release.outputs['pi-spec-kit--release_created'] }}
+      hashline-edit-release-created: ${{ steps.release.outputs['packages/hashline-edit--release_created'] }}
+      tokenshrink-release-created: ${{ steps.release.outputs['packages/tokenshrink--release_created'] }}
+      spec-kit-release-created: ${{ steps.release.outputs['packages/spec-kit--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
