@@ -8,10 +8,9 @@ import {
   PROVIDER_DOMAINS,
   resolveAllowedDomains,
   resolvePolicy,
+  resolveLocalServices,
   loadConfig,
 } from './config.ts'
-
-// ── resolveAllowedDomains ─────────────────────────────────────────────────────
 
 describe('resolveAllowedDomains', () => {
   it('returns empty array when no network config supplied', () => {
@@ -73,8 +72,6 @@ describe('resolveAllowedDomains', () => {
   })
 })
 
-// ── resolvePolicy ─────────────────────────────────────────────────────────────
-
 describe('resolvePolicy', () => {
   it('returns deny-all when no config and no domains', () => {
     assert.equal(resolvePolicy(undefined, []), 'deny-all')
@@ -101,8 +98,6 @@ describe('resolvePolicy', () => {
   })
 })
 
-// ── PROVIDER_DOMAINS ──────────────────────────────────────────────────────────
-
 describe('PROVIDER_DOMAINS', () => {
   const knownProviders = ['github-copilot', 'gemini', 'openai', 'anthropic', 'ollama']
 
@@ -118,8 +113,6 @@ describe('PROVIDER_DOMAINS', () => {
     }
   })
 })
-
-// ── loadConfig ────────────────────────────────────────────────────────────────
 
 describe('loadConfig', () => {
   // run in a clean temp dir so cosmiconfig never finds the repo's own config
@@ -233,5 +226,73 @@ describe('loadConfig', () => {
       network: { policy: 'deny-all', allowedDomains: ['api.openai.com'] },
     }))
     assert.throws(() => loadConfig(), /deny-all.*providers or allowedDomains/)
+  })
+})
+
+describe('resolveLocalServices', () => {
+  it('returns empty array when no config supplied', () => {
+    assert.deepEqual(resolveLocalServices(undefined), [])
+  })
+
+  it('returns empty array for empty localServices list', () => {
+    assert.deepEqual(resolveLocalServices({ localServices: [] }), [])
+  })
+
+  it('resolves a single entry to hostname and upstream address', () => {
+    const result = resolveLocalServices({ localServices: [{ hostname: 'my-api.local', port: 8080 }] })
+    assert.deepEqual(result, [{ hostname: 'my-api.local', upstream: '127.0.0.1:8080' }])
+  })
+
+  it('resolves multiple entries', () => {
+    const result = resolveLocalServices({
+      localServices: [
+        { hostname: 'ollama.local', port: 11434 },
+        { hostname: 'db.local', port: 5432 },
+      ],
+    })
+    assert.deepEqual(result, [
+      { hostname: 'ollama.local', upstream: '127.0.0.1:11434' },
+      { hostname: 'db.local', upstream: '127.0.0.1:5432' },
+    ])
+  })
+
+  it('throws for missing hostname', () => {
+    assert.throws(
+      () => resolveLocalServices({ localServices: [{ hostname: '', port: 8080 }] }),
+      /hostname.*must be a non-empty string/,
+    )
+  })
+
+  it('throws when hostname is an IPv4 address', () => {
+    assert.throws(
+      () => resolveLocalServices({ localServices: [{ hostname: '127.0.0.1', port: 8080 }] }),
+      /hostname.*must be a DNS name, not an IP address/,
+    )
+  })
+
+  it('throws when hostname contains a colon (IP:port syntax)', () => {
+    assert.throws(
+      () => resolveLocalServices({ localServices: [{ hostname: '127.0.0.1:8080', port: 8080 }] }),
+      /hostname.*must be a DNS name, not an IP address/,
+    )
+  })
+
+
+  it('throws for port out of range', () => {
+    assert.throws(
+      () => resolveLocalServices({ localServices: [{ hostname: 'x.local', port: 0 }] }),
+      /port.*must be an integer/,
+    )
+    assert.throws(
+      () => resolveLocalServices({ localServices: [{ hostname: 'x.local', port: 65536 }] }),
+      /port.*must be an integer/,
+    )
+  })
+
+  it('throws for non-integer port', () => {
+    assert.throws(
+      () => resolveLocalServices({ localServices: [{ hostname: 'x.local', port: 8080.5 }] }),
+      /port.*must be an integer/,
+    )
   })
 })

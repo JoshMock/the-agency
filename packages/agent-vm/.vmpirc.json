@@ -1,8 +1,0 @@
-{
-  "memory": 512,
-  "network": {
-    "providers": [
-      "github-copilot"
-    ]
-  }
-}

@@ -1,7 +1,7 @@
 {
-  "name": "@the-agency/agent-vm",
+  "name": "@the-agency/vmpi",
   "version": "0.1.0",
-  "description": "Run pi sandboxed in a Firecracker microVM via vmsan — limited file access, 256 MiB RAM, 1 vCPU.",
+  "description": "Run pi sandboxed in a QEMU microVM via Gondolin",
   "type": "module",
   "bin": {
     "vmpi": "./vmpi.ts"
@@ -15,8 +15,8 @@
     "pi",
     "pi-package",
     "sandbox",
-    "firecracker",
-    "vmsan",
+    "qemu",
+    "gondolin",
     "microvm"
   ],
   "author": "Josh Mock <josh@joshmock.com>",
@@ -28,12 +28,13 @@
     "linux"
   ],
   "dependencies": {
+    "@earendil-works/gondolin": "^0.7.0",
     "commander": "^14.0.3",
-    "cosmiconfig": "^9.0.1",
-    "vmsan": "^0.3.0"
+    "cosmiconfig": "^9.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.14.9",
+    "@types/node-forge": "^1.3.14",
     "tsx": "^4.21.0",
     "typescript": "^5.5.2"
   }
