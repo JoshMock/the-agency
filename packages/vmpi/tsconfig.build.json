@@ -4,11 +4,13 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
-    "noEmit": true,
     "isolatedModules": true,
     "verbatimModuleSyntax": true,
     "lib": ["ES2022", "DOM"],
-    "types": ["node"]
+    "types": ["node"],
+    "outDir": "dist",
+    "declaration": true
   },
-  "include": ["*.ts"]
+  "include": ["*.ts"],
+  "exclude": ["*.test.ts"]
 }

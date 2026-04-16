@@ -12,7 +12,7 @@ import {
   loadConfig,
   resolveGuestPackages,
   DEFAULT_GUEST_PACKAGES,
-} from './config.ts'
+} from './config.js'
 
 describe('resolveAllowedDomains', () => {
   it('returns empty array when no network config supplied', () => {

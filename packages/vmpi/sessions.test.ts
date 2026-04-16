@@ -9,7 +9,7 @@ import {
   sessionDirNameToCwd,
   prepareSessionsForVm,
   collectSessionsFromVm,
-} from './sessions.ts'
+} from './sessions.js'
 
 /** Creates a temporary pi config dir, returning its path and a cleanup function. */
 function makeTmpPiDir(): { piDir: string; cleanup: () => void } {

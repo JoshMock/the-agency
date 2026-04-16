@@ -14,8 +14,8 @@ import {
   type VMOptions,
   type DebugComponent,
 } from '@earendil-works/gondolin'
-import { loadConfig, type ResolvedConfig } from './config.ts'
-import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.ts'
+import { loadConfig, type ResolvedConfig } from './config.js'
+import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.js'
 
 let _config: ResolvedConfig | undefined
 let debugMode = false

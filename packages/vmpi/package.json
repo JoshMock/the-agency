@@ -4,10 +4,12 @@
   "description": "Run pi sandboxed in a QEMU microVM via Gondolin",
   "type": "module",
   "bin": {
-    "vmpi": "./vmpi.ts"
+    "vmpi": "./dist/vmpi.js"
   },
+  "files": ["dist"],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
     "test": "node --import tsx/esm --test *.test.ts",
     "typecheck": "tsc --noEmit"
   },
