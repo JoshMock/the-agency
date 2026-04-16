@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/JoshMock/the-agency/compare/pi-hashline-edit-v0.2.0...pi-hashline-edit-v0.2.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* set repository URL ([#53](https://github.com/JoshMock/the-agency/issues/53)) ([fe4fb9d](https://github.com/JoshMock/the-agency/commit/fe4fb9d1a0f275edcf30186d5a7ef75ee12b857e))
+
 ## [0.2.0](https://github.com/JoshMock/the-agency/compare/pi-hashline-edit-v0.1.1...pi-hashline-edit-v0.2.0) (2026-04-03)
 
 

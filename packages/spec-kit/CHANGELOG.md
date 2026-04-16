@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.4](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.3...pi-spec-kit-v0.2.4) (2026-04-16)
+
+
+### Bug Fixes
+
+* set repository URL ([#53](https://github.com/JoshMock/the-agency/issues/53)) ([fe4fb9d](https://github.com/JoshMock/the-agency/commit/fe4fb9d1a0f275edcf30186d5a7ef75ee12b857e))
+
 ## [0.2.3](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.2...pi-spec-kit-v0.2.3) (2026-03-31)
 
 
