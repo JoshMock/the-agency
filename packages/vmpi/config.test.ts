@@ -120,7 +120,7 @@ describe('loadConfig', () => {
   let originalCwd: string
   let savedEnv: Record<string, string | undefined>
 
-  const ENV_KEYS = ['VMPI_MEMORY', 'VMPI_CPUS', 'PI_CONFIG_DIR', 'VMPI_STATE_DIR']
+  const ENV_KEYS = ['VMPI_MEMORY', 'VMPI_CPUS', 'PI_CONFIG_DIR', 'VMPI_STATE_DIR', 'VMPI_ROOTFS_EXTRA_MB']
 
   before(() => {
     tmpDir = join(tmpdir(), `vmpi-test-${Date.now()}`)
@@ -150,10 +150,11 @@ describe('loadConfig', () => {
 
   it('returns defaults when no config file or env vars are present', () => {
     const cfg = loadConfig()
-    assert.equal(cfg.memory, 256)
+    assert.equal(cfg.memory, 512)
     assert.equal(cfg.cpus, 1)
     assert.equal(cfg.piConfigDir, join(homedir(), '.pi'))
     assert.equal(cfg.stateDir, join(homedir(), '.vmpi'))
+    assert.equal(cfg.rootfsExtraMb, 128)
     assert.equal(cfg.network.policy, 'deny-all')
     assert.deepEqual(cfg.network.allowedDomains, [])
   })
@@ -169,6 +170,25 @@ describe('loadConfig', () => {
     assert.equal(cfg.cpus, 4)
     assert.equal(cfg.piConfigDir, '/custom/pi')
     assert.equal(cfg.stateDir, '/custom/vmpi')
+  })
+
+  it('reads rootfsExtraMb from a .vmpirc.json file', () => {
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ rootfsExtraMb: 256 }))
+    const cfg = loadConfig()
+    assert.equal(cfg.rootfsExtraMb, 256)
+  })
+
+  it('overrides rootfsExtraMb via VMPI_ROOTFS_EXTRA_MB env var', () => {
+    process.env.VMPI_ROOTFS_EXTRA_MB = '512'
+    const cfg = loadConfig()
+    assert.equal(cfg.rootfsExtraMb, 512)
+  })
+
+  it('env var takes precedence over config file for rootfsExtraMb', () => {
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ rootfsExtraMb: 64 }))
+    process.env.VMPI_ROOTFS_EXTRA_MB = '256'
+    const cfg = loadConfig()
+    assert.equal(cfg.rootfsExtraMb, 256)
   })
 
   it('reads memory and cpus from a .vmpirc.json file', () => {

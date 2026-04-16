@@ -11,6 +11,8 @@ import {
   VmCheckpoint,
   RealFSProvider,
   createHttpHooks,
+  type VMOptions,
+  type DebugComponent,
 } from '@earendil-works/gondolin'
 import { loadConfig, type ResolvedConfig } from './config.ts'
 import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.ts'
@@ -60,8 +62,8 @@ function checkPrerequisites(): void {
 
   // Required binaries
   const required: [string, string][] = [
-    ['qemu-system-x86_64', 'Arch: sudo pacman -S qemu-system-x86  |  Ubuntu: sudo apt install qemu-system-x86'],
-    ['qemu-img',           'Arch: sudo pacman -S qemu-img         |  Ubuntu: sudo apt install qemu-utils'],
+    ['qemu-system-x86_64', 'Arch: sudo pacman -S qemu-system-x86 | Ubuntu: sudo apt install qemu-system-x86'],
+    ['qemu-img', 'Arch: sudo pacman -S qemu-img | Ubuntu: sudo apt install qemu-utils'],
   ]
   for (const [bin, hint] of required) {
     if (spawnSync('which', [bin], { stdio: 'pipe' }).status !== 0) {
@@ -80,13 +82,65 @@ function checkPrerequisites(): void {
 }
 
 /**
+ * Ensures Gondolin's rootfs.ext4 has enough free space to store the pi bundle.
+ * If free space is below `rootfsExtraMb`, grows the image by `rootfsExtraMb` MiB
+ * using `qemu-img resize` then repairs and expands the filesystem with
+ * `e2fsck` and `resize2fs`.
+ *
+ * Skipped entirely if the rootfs already has sufficient headroom.
+ * The `rootfsExtraMb` value comes from config (default: 128).
+ */
+async function ensureRootfsHeadroom(): Promise<void> {
+  const { ensureGuestAssets } = await import('@earendil-works/gondolin')
+  const assets = await ensureGuestAssets()
+  const rootfsPath = assets.rootfsPath
+  const extraMb = getConfig().rootfsExtraMb
+
+  // Query current free blocks via `resize2fs -P` (prints minimum size, not free
+  // space directly). Use `dumpe2fs` instead for accurate free block count.
+  const dump = spawnSync('dumpe2fs', ['-h', rootfsPath], { stdio: 'pipe' })
+  if (dump.status !== 0) {
+    info('Warning: could not inspect rootfs with dumpe2fs — skipping resize check')
+    return
+  }
+  const dumpOut = dump.stdout.toString()
+  const freeBlocksMatch = dumpOut.match(/Free blocks:\s+(\d+)/)
+  const blockSizeMatch = dumpOut.match(/Block size:\s+(\d+)/)
+  if (freeBlocksMatch == null || blockSizeMatch == null) {
+    info('Warning: could not parse rootfs free space — skipping resize check')
+    return
+  }
+  const freeMb = (parseInt(freeBlocksMatch[1]) * parseInt(blockSizeMatch[1])) / (1024 * 1024)
+  info(`Rootfs free space: ${freeMb.toFixed(1)} MiB (threshold: ${extraMb} MiB)`)
+
+  if (freeMb >= extraMb) {
+    info('Rootfs has sufficient headroom — skipping resize')
+    return
+  }
+
+  info(`Rootfs free space is low — growing image by ${extraMb} MiB...`)
+  const resizeResult = spawnSync('qemu-img', ['resize', rootfsPath, `+${extraMb}M`], { stdio: 'inherit' })
+  if (resizeResult.status !== 0) die('qemu-img resize failed')
+
+  // e2fsck must run on an unmounted image before resize2fs
+  const fsckResult = spawnSync('e2fsck', ['-f', '-y', rootfsPath], { stdio: 'inherit' })
+  // e2fsck exits 1 for corrected errors, 2 for errors requiring reboot — both are fine here
+  if (fsckResult.status != null && fsckResult.status > 2) die('e2fsck failed')
+
+  const resizeFsResult = spawnSync('resize2fs', [rootfsPath], { stdio: 'inherit' })
+  if (resizeFsResult.status !== 0) die('resize2fs failed')
+
+  info(`Rootfs grown by ${extraMb} MiB`)
+}
+
+/**
  * Returns `sandbox` options shared by all VM.create() calls:
  * - forces `q35` machine type on Linux x86_64 to fix Gondolin's broken
  *   `microvm` default (which has no PCI bus but generates PCI device args)
  * - enables network debug logging when `--debug` is passed
  */
-function sandboxOptions(): import('@earendil-works/gondolin').VMOptions['sandbox'] {
-  const opts: import('@earendil-works/gondolin').VMOptions['sandbox'] = {}
+function sandboxOptions(): VMOptions['sandbox'] {
+  const opts: VMOptions['sandbox'] = {}
   if (process.platform === 'linux' && process.arch === 'x64') {
     opts.machineType = 'q35'
   }
@@ -97,9 +151,9 @@ function sandboxOptions(): import('@earendil-works/gondolin').VMOptions['sandbox
  * Returns the debug log callback when `--debug` is active, otherwise null
  * (suppresses all Gondolin debug output).
  */
-function debugLog(): import('@earendil-works/gondolin').VMOptions['debugLog'] {
+function debugLog(): VMOptions['debugLog'] {
   if (!debugMode) return null
-  return (component: import('@earendil-works/gondolin').DebugComponent, message: string) => {
+  return (component: DebugComponent, message: string) => {
     process.stderr.write(`[gondolin:${component}] ${message}\n`)
   }
 }
@@ -135,9 +189,10 @@ async function vmExec(vm: VM, cmd: string): Promise<void> {
  *
  * This approach avoids running `npm install` inside the VM entirely:
  *   - The VM's rootfs has only ~79 MB free; pi's node_modules is ~180 MB
- *   - We can't resize the rootfs without modifying Gondolin's cached image
+ *   - The rootfs is auto-grown by ensureRootfsHeadroom() but /tmp is tmpfs,
  *   - Instead, store the 33 MB compressed archive on the rootfs (/opt/),
- *     extract to /tmp (tmpfs, 486 MB) on each run
+ *     extract to /tmp (tmpfs, ~50% of VM RAM) on each run; 512 MiB RAM gives
+ *     ~256 MiB of tmpfs, which comfortably fits the ~180 MB extracted bundle
  */
 async function buildPiBundle(): Promise<Buffer> {
   const cacheDir = join(getConfig().stateDir, 'cache')
@@ -153,10 +208,12 @@ async function buildPiBundle(): Promise<Buffer> {
   // bundle is rebuilt when packages are added or removed.
   let pkgHash = 'no-pkgs'
   const settingsPath = join(getConfig().piConfigDir, 'agent', 'settings.json')
+  let piPackages: string[] = []
   if (existsSync(settingsPath)) {
     try {
       const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { packages?: string[] }
-      const pkgs = (settings.packages ?? []).sort().join(',')
+      piPackages = settings.packages ?? []
+      const pkgs = piPackages.sort().join(',')
       pkgHash = createHash('sha1').update(pkgs).digest('hex').slice(0, 8)
     } catch { /* use default */ }
   }
@@ -199,24 +256,16 @@ async function buildPiBundle(): Promise<Buffer> {
 
   // Also install the user's pi packages into the bundle so they're available
   // inside the VM without network access.
-  // settingsPath is already resolved above for the cache key
-  if (existsSync(settingsPath)) {
-    try {
-      const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { packages?: string[] }
-      const packages = (settings.packages ?? []).filter(p => p.startsWith('npm:'))
-      if (packages.length > 0) {
-        info(`Installing ${packages.length} pi package(s) into bundle...`)
-        const specs = packages.map(p => p.slice('npm:'.length))
-        const pkgResult = spawnSync(
-          'npm', ['install', ...specs, '--save', '--legacy-peer-deps'],
-          { cwd: installDir, stdio: 'inherit' },
-        )
-        if (pkgResult.status !== 0) {
-          info('Warning: some pi packages failed to install — they will be skipped in the VM')
-        }
-      }
-    } catch {
-      info('Warning: could not read pi settings.json — skipping pi package installation')
+  const npmPackages = piPackages.filter(p => p.startsWith('npm:'))
+  if (npmPackages.length > 0) {
+    info(`Installing ${npmPackages.length} pi package(s) into bundle...`)
+    const specs = npmPackages.map(p => p.slice('npm:'.length))
+    const pkgResult = spawnSync(
+      'npm', ['install', ...specs, '--save', '--legacy-peer-deps'],
+      { cwd: installDir, stdio: 'inherit' },
+    )
+    if (pkgResult.status !== 0) {
+      info('Warning: some pi packages failed to install — they will be skipped in the VM')
     }
   }
 
@@ -277,6 +326,7 @@ function buildHttpHooks(): ReturnType<typeof createHttpHooks>['httpHooks'] | und
  */
 async function cmdSetup(): Promise<void> {
   checkPrerequisites()
+  await ensureRootfsHeadroom()
   info('Building base checkpoint (installing pi)...')
   mkdirSync(getConfig().stateDir, { recursive: true })
 
@@ -444,7 +494,7 @@ async function cmdRun(args: string[]): Promise<void> {
 const CONFIG_HELP = `
 Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
 
-  memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 256)
+  memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 512)
   cpus            vCPU count                  (env: VMPI_CPUS,      default: 1)
   piConfigDir     pi config dir on host       (env: PI_CONFIG_DIR,  default: ~/.pi)
   stateDir        vmpi state dir on host      (env: VMPI_STATE_DIR, default: ~/.vmpi)

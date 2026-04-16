@@ -10,7 +10,7 @@ Run `pi` sandboxed in a [QEMU](https://www.qemu.org/) microVM via [Gondolin](htt
 
 ...and nothing else.
 
-**Resources:** 256 MiB RAM, 1 vCPU, network restricted to configured LLM provider domains
+**Resources:** 512 MiB RAM, 1 vCPU, network restricted to configured LLM provider domains
 
 **No root required:** Gondolin's QEMU backend runs entirely as the current user.
 
@@ -115,7 +115,7 @@ It searches for configuration files from your current directory up to the root d
 
 | Key | Default | Description |
 |---|---|---|
-| `memory` | `256` | RAM in MiB |
+| `memory` | `512` | RAM in MiB |
 | `cpus` | `1` | vCPU count |
 | `piConfigDir` | `~/.pi` | Path to the pi config directory on the host |
 | `stateDir` | `~/.vmpi` | Where vmpi stores the base checkpoint and tarball cache |
@@ -123,8 +123,9 @@ It searches for configuration files from your current directory up to the root d
 | `network.providers` | `[]` | LLM provider names to allow (see below) |
 | `network.allowedDomains` | `[]` | Additional external domain patterns to allow |
 | `network.localServices` | `[]` | Host services to expose inside the VM. Each entry is `{ hostname, port }`. The VM can reach `hostname` at the given host `port` via a raw TCP tunnel. |
+| `rootfsExtraMb` | `128` | MiB to add to the Gondolin rootfs image during `vmpi setup` when free space is below this threshold. Increase this if setup fails with a disk-full error. |
 
-Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_DIR`) override their config file equivalents.
+Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_DIR`, `VMPI_ROOTFS_EXTRA_MB`) override their config file equivalents.
 
 ### Built-in providers
 
@@ -186,6 +187,7 @@ chipset) via `sandbox: { machineType: 'q35' }` as a workaround.
 - **First run is slow:** `vmpi setup` downloads the Gondolin guest image (~300 MB),
   downloads the pi tarball (~4 MB), and runs `npm install` inside the VM (~60s total).
   Subsequent runs resume from the checkpoint in ~1 s.
+- **Rootfs free space:** Gondolin's Alpine rootfs image has limited free space (~79 MiB). `vmpi setup` automatically grows the image by `rootfsExtraMb` MiB (default: 128) using `qemu-img resize` + `e2fsck` + `resize2fs` whenever free space is below that threshold. This requires `e2fsprogs` (`sudo apt install e2fsprogs` / `sudo pacman -S e2fsprogs`). If setup still fails with a disk-full error, increase `rootfsExtraMb` in your `.vmpirc.json` or via `VMPI_ROOTFS_EXTRA_MB`.
 - **Session directory is tmpfs:** `/root`, `/tmp`, and `/var/log` are tmpfs-backed in
   the guest. Sessions under `/root/.pi` are visible on the host via the VFS mount and
   are not lost when the VM closes.

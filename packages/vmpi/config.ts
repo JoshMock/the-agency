@@ -106,7 +106,7 @@ interface NetworkConfig {
 
 /** Top-level vmpi configuration file schema. */
 export interface VmpiConfig {
-  /** RAM in MiB (default: 256). */
+  /** RAM in MiB (default: 512). */
   memory?: number
 
   /** vCPU count (default: 1). */
@@ -120,6 +120,13 @@ export interface VmpiConfig {
 
   /** Network policy settings for the sandbox VM. */
   network?: NetworkConfig
+
+  /**
+   * Extra MiB to add to Gondolin's rootfs image during setup if free space is
+   * insufficient to store the pi bundle. Resizing is skipped when the rootfs
+   * already has enough headroom. (default: 128)
+   */
+  rootfsExtraMb?: number
 }
 
 /** A resolved local service entry with the upstream address string. */
@@ -136,6 +143,7 @@ export interface ResolvedConfig {
   cpus: number
   piConfigDir: string
   stateDir: string
+  rootfsExtraMb: number
   network: {
     policy: 'allow-all' | 'deny-all' | 'custom'
     allowedDomains: string[]
@@ -218,10 +226,11 @@ export function loadConfig(): ResolvedConfig {
   const result = explorer.search()
   const file: VmpiConfig = result?.config ?? {}
 
-  const memory = num(process.env.VMPI_MEMORY) ?? file.memory ?? 256
+  const memory = num(process.env.VMPI_MEMORY) ?? file.memory ?? 512
   const cpus = num(process.env.VMPI_CPUS) ?? file.cpus ?? 1
   const piConfigDir = process.env.PI_CONFIG_DIR ?? file.piConfigDir ?? join(homedir(), '.pi')
   const stateDir = process.env.VMPI_STATE_DIR ?? file.stateDir ?? join(homedir(), '.vmpi')
+  const rootfsExtraMb = num(process.env.VMPI_ROOTFS_EXTRA_MB) ?? file.rootfsExtraMb ?? 128
 
   const allowedDomains = resolveAllowedDomains(file.network)
   const policy = resolvePolicy(file.network, allowedDomains)
@@ -234,7 +243,7 @@ export function loadConfig(): ResolvedConfig {
     )
   }
 
-  return { memory, cpus, piConfigDir, stateDir, network: { policy, allowedDomains, localServices } }
+  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, network: { policy, allowedDomains, localServices } }
 }
 
 /** Parses a string as a number, returning undefined for missing/NaN values. */
