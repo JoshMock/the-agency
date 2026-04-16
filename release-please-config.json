@@ -10,6 +10,9 @@
     },
     "packages/spec-kit": {
       "component": "pi-spec-kit"
+    },
+    "packages/vmpi": {
+      "component": "vmpi"
     }
   }
 }
