@@ -127,6 +127,13 @@ export interface VmpiConfig {
    * already has enough headroom. (default: 128)
    */
   rootfsExtraMb?: number
+
+  /**
+   * Additional Alpine packages to install in the guest during `vmpi setup`.
+   * The packages in `DEFAULT_GUEST_PACKAGES` are always installed regardless
+   * of this field.
+   */
+  guestPackages?: string[]
 }
 
 /** A resolved local service entry with the upstream address string. */
@@ -137,6 +144,13 @@ export interface ResolvedLocalService {
   upstream: string
 }
 
+/** Resolved network policy settings. */
+export interface ResolvedNetwork {
+  policy: 'allow-all' | 'deny-all' | 'custom'
+  allowedDomains: string[]
+  localServices: ResolvedLocalService[]
+}
+
 /** Fully resolved configuration with all defaults applied. */
 export interface ResolvedConfig {
   memory: number
@@ -144,11 +158,43 @@ export interface ResolvedConfig {
   piConfigDir: string
   stateDir: string
   rootfsExtraMb: number
-  network: {
-    policy: 'allow-all' | 'deny-all' | 'custom'
-    allowedDomains: string[]
-    localServices: ResolvedLocalService[]
-  }
+  /** Alpine packages to install in the guest (defaults + user extras). */
+  guestPackages: string[]
+  network: ResolvedNetwork
+}
+
+/** Alpine packages always installed in the guest, regardless of user config. */
+export const DEFAULT_GUEST_PACKAGES: readonly string[] = [
+  // version control
+  'git',
+  // file/text search (used by pi's find and grep tools)
+  'fd',
+  'ripgrep',
+  // HTTP and data tools
+  'curl',
+  'jq',
+  // scripting runtimes
+  'bash',
+  'python3',
+  'py3-pip',
+  'nodejs',
+  'npm',
+  // build and file utilities
+  'make',
+  'patch',
+  'file',
+  'sqlite',
+]
+
+/**
+ * Returns the full list of Alpine packages to install in the guest.
+ * Always includes `DEFAULT_GUEST_PACKAGES`; appends any extra packages from
+ * the config without duplicates.
+ */
+export function resolveGuestPackages(extra: string[] | undefined): string[] {
+  const result = new Set(DEFAULT_GUEST_PACKAGES)
+  for (const pkg of extra ?? []) result.add(pkg)
+  return [...result]
 }
 
 /**
@@ -235,6 +281,7 @@ export function loadConfig(): ResolvedConfig {
   const allowedDomains = resolveAllowedDomains(file.network)
   const policy = resolvePolicy(file.network, allowedDomains)
   const localServices = resolveLocalServices(file.network)
+  const guestPackages = resolveGuestPackages(file.guestPackages)
 
   if (policy === 'deny-all' && allowedDomains.length > 0) {
     throw new Error(
@@ -243,7 +290,7 @@ export function loadConfig(): ResolvedConfig {
     )
   }
 
-  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, network: { policy, allowedDomains, localServices } }
+  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, network: { policy, allowedDomains, localServices } }
 }
 
 /** Parses a string as a number, returning undefined for missing/NaN values. */

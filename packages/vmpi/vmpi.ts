@@ -331,7 +331,7 @@ async function cmdSetup(): Promise<void> {
   mkdirSync(getConfig().stateDir, { recursive: true })
 
   const piBundle = await buildPiBundle()
-  const { memory, cpus } = getConfig()
+  const { memory, cpus, guestPackages } = getConfig()
 
   // `cow` rootfs mode requires `qemu-img`; `memory` uses QEMU's built-in
   // snapshot mode and needs no extra tooling. We use `cow` here because we
@@ -360,6 +360,9 @@ async function cmdSetup(): Promise<void> {
     await vm.fs.writeFile('/opt/pi-modules.tgz', piBundle)
     const r = await vm.exec(['/bin/sh', '-c', 'df -h / && ls -lh /opt/pi-modules.tgz'])
     if (debugMode) process.stderr.write(r.stdout)
+
+    info(`Installing guest packages: ${guestPackages.join(', ')}...`)
+    await vm.exec(['/bin/sh', '-c', `apk add --no-cache ${guestPackages.join(' ')}`])
 
     info('Creating base checkpoint...')
     const checkpoint = await vm.checkpoint(checkpointFile())

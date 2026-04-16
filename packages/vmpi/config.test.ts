@@ -10,6 +10,8 @@ import {
   resolvePolicy,
   resolveLocalServices,
   loadConfig,
+  resolveGuestPackages,
+  DEFAULT_GUEST_PACKAGES,
 } from './config.ts'
 
 describe('resolveAllowedDomains', () => {
@@ -138,6 +140,7 @@ describe('loadConfig', () => {
     savedEnv = Object.fromEntries(ENV_KEYS.map(k => [k, process.env[k]]))
     for (const k of ENV_KEYS) delete process.env[k]
     process.chdir(tmpDir)
+    rmSync(join(tmpDir, '.vmpirc.json'), { force: true })
   })
 
   afterEach(() => {
@@ -247,6 +250,47 @@ describe('loadConfig', () => {
     }))
     assert.throws(() => loadConfig(), /deny-all.*providers or allowedDomains/)
   })
+
+  it('returns default guest packages when no guestPackages in config', () => {
+    const cfg = loadConfig()
+    for (const pkg of DEFAULT_GUEST_PACKAGES) {
+      assert.ok(cfg.guestPackages.includes(pkg))
+    }
+  })
+
+  it('merges guestPackages from config file with defaults', () => {
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ guestPackages: ['jq'] }))
+    const cfg = loadConfig()
+    assert.ok(cfg.guestPackages.includes('jq'))
+    for (const pkg of DEFAULT_GUEST_PACKAGES) {
+      assert.ok(cfg.guestPackages.includes(pkg))
+    }
+  })
+
+})
+
+describe('resolveGuestPackages', () => {
+  it('returns the default packages when no extras given', () => {
+    const result = resolveGuestPackages(undefined)
+    for (const pkg of DEFAULT_GUEST_PACKAGES) {
+      assert.ok(result.includes(pkg), `expected default package '${pkg}' to be present`)
+    }
+  })
+
+  it('includes extra packages alongside defaults', () => {
+    const result = resolveGuestPackages(['jq', 'curl'])
+    assert.ok(result.includes('jq'))
+    assert.ok(result.includes('curl'))
+    for (const pkg of DEFAULT_GUEST_PACKAGES) {
+      assert.ok(result.includes(pkg))
+    }
+  })
+
+  it('deduplicates packages that are already in defaults', () => {
+    const result = resolveGuestPackages(['git', 'jq'])
+    assert.equal(result.filter(p => p === 'git').length, 1)
+    assert.ok(result.includes('jq'))
+  })
 })
 
 describe('resolveLocalServices', () => {
@@ -296,7 +340,6 @@ describe('resolveLocalServices', () => {
       /hostname.*must be a DNS name, not an IP address/,
     )
   })
-
 
   it('throws for port out of range', () => {
     assert.throws(

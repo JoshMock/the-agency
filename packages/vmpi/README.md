@@ -124,7 +124,7 @@ It searches for configuration files from your current directory up to the root d
 | `network.allowedDomains` | `[]` | Additional external domain patterns to allow |
 | `network.localServices` | `[]` | Host services to expose inside the VM. Each entry is `{ hostname, port }`. The VM can reach `hostname` at the given host `port` via a raw TCP tunnel. |
 | `rootfsExtraMb` | `128` | MiB to add to the Gondolin rootfs image during `vmpi setup` when free space is below this threshold. Increase this if setup fails with a disk-full error. |
-
+| `guestPackages` | `[]` | Extra Alpine packages to install in the guest during `vmpi setup`, in addition to the defaults: `git`, `fd`, `ripgrep`, `curl`, `jq`, `bash`, `python3`, `py3-pip`, `nodejs`, `npm`, `make`, `patch`, `file`, `sqlite`. |
 Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_DIR`, `VMPI_ROOTFS_EXTRA_MB`) override their config file equivalents.
 
 ### Built-in providers
