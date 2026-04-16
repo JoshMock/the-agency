@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.4](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.3...vmpi-v0.1.4) (2026-04-16)
+
+
+### Bug Fixes
+
+* adjust session path sync to ensure consistency ([#55](https://github.com/JoshMock/the-agency/issues/55)) ([67c6998](https://github.com/JoshMock/the-agency/commit/67c699817fc325bf139647c14c3fbf2c9539777a))
+
 ## [0.1.3](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.2...vmpi-v0.1.3) (2026-04-16)
 
 
