@@ -4,7 +4,7 @@
   "description": "Run pi sandboxed in a QEMU microVM via Gondolin",
   "type": "module",
   "bin": {
-    "vmpi": "./dist/vmpi.js"
+    "vmpi": "dist/vmpi.js"
   },
   "files": [
     "dist"
