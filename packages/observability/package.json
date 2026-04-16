@@ -36,5 +36,10 @@
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JoshMock/the-agency.git",
+    "directory": "packages/observability"
+  }
 }

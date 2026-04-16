@@ -29,5 +29,10 @@
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JoshMock/the-agency.git",
+    "directory": "packages/spec-kit"
   }
 }
