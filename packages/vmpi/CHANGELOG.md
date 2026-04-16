@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.1...vmpi-v0.1.2) (2026-04-16)
+
+
+### Bug Fixes
+
+* bad nom publish configs ([#51](https://github.com/JoshMock/the-agency/issues/51)) ([336e323](https://github.com/JoshMock/the-agency/commit/336e323ca72a8f02d1f140e87fff4763772dcf3b))
+
 ## [0.1.1](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.0...vmpi-v0.1.1) (2026-04-16)
 
 
