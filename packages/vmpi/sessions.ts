@@ -1,4 +1,4 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, unlinkSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
 
 /**
@@ -64,8 +64,11 @@ export function prepareSessionsForVm(hostCwd: string, piConfigDir: string): void
  * Merges sessions written to the `--workspace--` slot back into the host
  * CWD session directory, then removes the `--workspace--` copy.
  *
- * New files (created during the VM run) are moved; existing files are left
- * untouched to avoid overwriting the host's copy with a VM-side duplicate.
+ * Pi appends to session files in-place when continuing a session, so the VM
+ * copy of an existing file may be larger than the host's original. Files are
+ * moved when new (not on host) or replaced when the VM copy is larger (new
+ * content was appended). Same-size copies — unchanged files that were only
+ * mirrored for context — are left on the host as-is.
  *
  * This is a no-op when `hostCwd` is `/workspace` or if no `--workspace--`
  * directory exists.
@@ -82,7 +85,7 @@ export function collectSessionsFromVm(hostCwd: string, piConfigDir: string): voi
 
   if (!existsSync(vmSessionDir)) return
 
-  // Guard against stale symlinks left by a previous vmpi version
+  // Guard against stale symlinks left by a previous vmpi version.
   if (lstatSync(vmSessionDir).isSymbolicLink()) {
     unlinkSync(vmSessionDir)
     return
@@ -90,9 +93,10 @@ export function collectSessionsFromVm(hostCwd: string, piConfigDir: string): voi
 
   mkdirSync(hostSessionDir, { recursive: true })
   for (const file of readdirSync(vmSessionDir)) {
+    const src = join(vmSessionDir, file)
     const dest = join(hostSessionDir, file)
-    if (!existsSync(dest)) {
-      renameSync(join(vmSessionDir, file), dest)
+    if (!existsSync(dest) || statSync(src).size > statSync(dest).size) {
+      renameSync(src, dest)
     }
   }
   rmSync(vmSessionDir, { recursive: true, force: true })

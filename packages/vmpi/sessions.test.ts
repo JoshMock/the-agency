@@ -11,6 +11,30 @@ import {
   collectSessionsFromVm,
 } from './sessions.ts'
 
+/** Creates a temporary pi config dir, returning its path and a cleanup function. */
+function makeTmpPiDir(): { piDir: string; cleanup: () => void } {
+  const piDir = join(tmpdir(), `vmpi-sessions-test-${Date.now()}`)
+  mkdirSync(piDir, { recursive: true })
+  return { piDir, cleanup: () => rmSync(piDir, { recursive: true, force: true }) }
+}
+
+/**
+ * Resolves the sessions dir paths for a given host CWD inside a pi config dir.
+ * Creates the sessions parent directory but not the session subdirectories.
+ */
+function sessionPaths(piDir: string, hostCwd: string): {
+  sessionsDir: string
+  hostSessionDir: string
+  vmSessionDir: string
+} {
+  const sessionsDir = join(piDir, 'agent', 'sessions')
+  return {
+    sessionsDir,
+    hostSessionDir: join(sessionsDir, cwdToSessionDirName(hostCwd)),
+    vmSessionDir: join(sessionsDir, '--workspace--'),
+  }
+}
+
 describe('cwdToSessionDirName', () => {
   it('encodes a typical absolute path', () => {
     assert.equal(
@@ -65,138 +89,128 @@ describe('sessionDirNameToCwd', () => {
 })
 
 describe('prepareSessionsForVm', () => {
-  let tmpPiDir: string
+  let piDir: string
+  let cleanup: () => void
 
   beforeEach(() => {
-    tmpPiDir = join(tmpdir(), `vmpi-sessions-test-${Date.now()}`)
-    mkdirSync(tmpPiDir, { recursive: true })
+    ({ piDir, cleanup } = makeTmpPiDir())
   })
 
-  afterEach(() => {
-    rmSync(tmpPiDir, { recursive: true, force: true })
-  })
+  afterEach(() => cleanup())
 
   it('is a no-op when no host session dir exists', () => {
-    prepareSessionsForVm('/home/alice/myproject', tmpPiDir)
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
+    prepareSessionsForVm('/home/alice/myproject', piDir)
+    const { sessionsDir } = sessionPaths(piDir, '/home/alice/myproject')
     assert.ok(!existsSync(sessionsDir) || readdirSync(sessionsDir).length === 0)
   })
 
   it('copies the host CWD session dir to --workspace--', () => {
-    const hostDirName = cwdToSessionDirName('/home/alice/myproject')
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
-    const hostSessionDir = join(sessionsDir, hostDirName)
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
     mkdirSync(hostSessionDir, { recursive: true })
     writeFileSync(join(hostSessionDir, 'session-1.json'), '{}')
 
-    prepareSessionsForVm('/home/alice/myproject', tmpPiDir)
+    prepareSessionsForVm('/home/alice/myproject', piDir)
 
-    const vmSessionDir = join(sessionsDir, '--workspace--')
-    assert.ok(existsSync(vmSessionDir), '--workspace-- should exist after prepare')
-    assert.ok(!lstatSync(vmSessionDir).isSymbolicLink(), '--workspace-- should be a real directory')
-    assert.ok(existsSync(join(vmSessionDir, 'session-1.json')), 'session file should be copied')
+    assert.ok(existsSync(vmSessionDir))
+    assert.ok(!lstatSync(vmSessionDir).isSymbolicLink())
+    assert.ok(existsSync(join(vmSessionDir, 'session-1.json')))
   })
 
   it('is a no-op when host CWD is /workspace', () => {
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
-    mkdirSync(join(sessionsDir, '--workspace--'), { recursive: true })
+    const { sessionsDir, vmSessionDir } = sessionPaths(piDir, '/workspace')
+    mkdirSync(vmSessionDir, { recursive: true })
 
-    prepareSessionsForVm('/workspace', tmpPiDir)
+    prepareSessionsForVm('/workspace', piDir)
 
-    const entries = readdirSync(sessionsDir)
-    assert.deepEqual(entries, ['--workspace--'])
+    assert.deepEqual(readdirSync(sessionsDir), ['--workspace--'])
   })
 
   it('is a no-op when --workspace-- already exists', () => {
-    const hostDirName = cwdToSessionDirName('/home/alice/myproject')
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
-    const hostSessionDir = join(sessionsDir, hostDirName)
-    const vmSessionDir = join(sessionsDir, '--workspace--')
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
     mkdirSync(hostSessionDir, { recursive: true })
     mkdirSync(vmSessionDir, { recursive: true })
     writeFileSync(join(vmSessionDir, 'existing.json'), '"already-there"')
 
-    prepareSessionsForVm('/home/alice/myproject', tmpPiDir)
+    prepareSessionsForVm('/home/alice/myproject', piDir)
 
     assert.ok(existsSync(join(vmSessionDir, 'existing.json')))
   })
 })
 
 describe('collectSessionsFromVm', () => {
-  let tmpPiDir: string
+  let piDir: string
+  let cleanup: () => void
 
   beforeEach(() => {
-    tmpPiDir = join(tmpdir(), `vmpi-sessions-test-${Date.now()}`)
-    mkdirSync(tmpPiDir, { recursive: true })
+    ({ piDir, cleanup } = makeTmpPiDir())
   })
 
-  afterEach(() => {
-    rmSync(tmpPiDir, { recursive: true, force: true })
-  })
+  afterEach(() => cleanup())
 
   it('is a no-op when --workspace-- does not exist', () => {
-    collectSessionsFromVm('/home/alice/myproject', tmpPiDir)
+    collectSessionsFromVm('/home/alice/myproject', piDir)
   })
 
-  it('merges --workspace-- back into the host CWD session dir and removes it', () => {
-    const hostDirName = cwdToSessionDirName('/home/alice/myproject')
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
-    const hostSessionDir = join(sessionsDir, hostDirName)
-    const vmSessionDir = join(sessionsDir, '--workspace--')
-
-    // simulate: prepare copied sessions, VM wrote a new session
+  it('moves new session files to the host dir and removes --workspace--', () => {
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
     mkdirSync(hostSessionDir, { recursive: true })
     writeFileSync(join(hostSessionDir, 'old-session.json'), '"old"')
     mkdirSync(vmSessionDir, { recursive: true })
     writeFileSync(join(vmSessionDir, 'old-session.json'), '"old"')
     writeFileSync(join(vmSessionDir, 'new-session.json'), '"new"')
 
-    collectSessionsFromVm('/home/alice/myproject', tmpPiDir)
+    collectSessionsFromVm('/home/alice/myproject', piDir)
 
-    assert.ok(!existsSync(vmSessionDir), '--workspace-- should be removed after collect')
-    assert.ok(existsSync(join(hostSessionDir, 'new-session.json')), 'new session should be moved to host dir')
+    assert.ok(!existsSync(vmSessionDir))
+    assert.ok(existsSync(join(hostSessionDir, 'new-session.json')))
   })
 
-  it('does not overwrite existing files when merging', () => {
-    const hostDirName = cwdToSessionDirName('/home/alice/myproject')
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
-    const hostSessionDir = join(sessionsDir, hostDirName)
-    const vmSessionDir = join(sessionsDir, '--workspace--')
-
+  it('does not overwrite a host file when the VM copy is the same size', () => {
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
     mkdirSync(hostSessionDir, { recursive: true })
-    writeFileSync(join(hostSessionDir, 'existing.json'), '"original"')
+    writeFileSync(join(hostSessionDir, 'existing.json'), '"same-content"')
     mkdirSync(vmSessionDir, { recursive: true })
-    writeFileSync(join(vmSessionDir, 'existing.json'), '"vm-version"')
+    writeFileSync(join(vmSessionDir, 'existing.json'), '"same-content"')
     writeFileSync(join(vmSessionDir, 'new.json'), '"new"')
 
-    collectSessionsFromVm('/home/alice/myproject', tmpPiDir)
+    collectSessionsFromVm('/home/alice/myproject', piDir)
 
-    assert.equal(readFileSync(join(hostSessionDir, 'existing.json'), 'utf8'), '"original"')
+    assert.equal(readFileSync(join(hostSessionDir, 'existing.json'), 'utf8'), '"same-content"')
     assert.ok(existsSync(join(hostSessionDir, 'new.json')))
   })
 
+  it('overwrites a host file when the VM copy is larger (pi appended to it)', () => {
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
+    mkdirSync(hostSessionDir, { recursive: true })
+    writeFileSync(join(hostSessionDir, 'session.jsonl'), 'original')
+    mkdirSync(vmSessionDir, { recursive: true })
+    writeFileSync(join(vmSessionDir, 'session.jsonl'), 'original\nappended turn')
+
+    collectSessionsFromVm('/home/alice/myproject', piDir)
+
+    assert.equal(readFileSync(join(hostSessionDir, 'session.jsonl'), 'utf8'), 'original\nappended turn')
+    assert.ok(!existsSync(vmSessionDir))
+  })
+
   it('cleans up a stale symlink left by a previous vmpi version', () => {
-    const hostDirName = cwdToSessionDirName('/home/alice/myproject')
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
-    const hostSessionDir = join(sessionsDir, hostDirName)
-    const vmSessionDir = join(sessionsDir, '--workspace--')
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
     mkdirSync(hostSessionDir, { recursive: true })
     writeFileSync(join(hostSessionDir, 'session-1.json'), '{}')
     symlinkSync(hostSessionDir, vmSessionDir)
     assert.ok(lstatSync(vmSessionDir).isSymbolicLink())
 
-    collectSessionsFromVm('/home/alice/myproject', tmpPiDir)
+    collectSessionsFromVm('/home/alice/myproject', piDir)
 
-    assert.ok(!existsSync(vmSessionDir), 'stale symlink should be removed')
-    assert.ok(existsSync(join(hostSessionDir, 'session-1.json')), 'host dir should be untouched')
+    assert.ok(!existsSync(vmSessionDir))
+    assert.ok(existsSync(join(hostSessionDir, 'session-1.json')))
   })
 
   it('is a no-op when host CWD is /workspace', () => {
-    const sessionsDir = join(tmpPiDir, 'agent', 'sessions')
-    mkdirSync(join(sessionsDir, '--workspace--'), { recursive: true })
+    const { vmSessionDir } = sessionPaths(piDir, '/workspace')
+    mkdirSync(vmSessionDir, { recursive: true })
 
-    collectSessionsFromVm('/workspace', tmpPiDir)
+    collectSessionsFromVm('/workspace', piDir)
 
-    assert.ok(existsSync(join(sessionsDir, '--workspace--')))
+    assert.ok(existsSync(vmSessionDir))
   })
 })
