@@ -1,12 +1,14 @@
 {
   "name": "@the-agency/vmpi",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run pi sandboxed in a QEMU microVM via Gondolin",
   "type": "module",
   "bin": {
     "vmpi": "./dist/vmpi.js"
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build",
