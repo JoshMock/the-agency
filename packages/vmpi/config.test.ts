@@ -267,6 +267,25 @@ describe('loadConfig', () => {
     }
   })
 
+  it('finds config file in a parent directory', () => {
+    const subDir = join(tmpDir, 'nested', 'child')
+    mkdirSync(subDir, { recursive: true })
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ memory: 2048 }))
+    process.chdir(subDir)
+    const cfg = loadConfig()
+    assert.equal(cfg.memory, 2048)
+  })
+
+  it('prefers config in cwd over one in a parent directory', () => {
+    const subDir = join(tmpDir, 'nested')
+    mkdirSync(subDir, { recursive: true })
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ memory: 2048 }))
+    writeFileSync(join(subDir, '.vmpirc.json'), JSON.stringify({ memory: 4096 }))
+    process.chdir(subDir)
+    const cfg = loadConfig()
+    assert.equal(cfg.memory, 4096)
+  })
+
 })
 
 describe('resolveGuestPackages', () => {

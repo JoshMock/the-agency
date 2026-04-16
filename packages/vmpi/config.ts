@@ -262,12 +262,14 @@ export function resolveLocalServices(network: NetworkConfig | undefined): Resolv
  * Loads vmpi configuration from cosmiconfig search paths and environment
  * variable overrides, returning a fully resolved config with defaults applied.
  *
- * Search locations (in priority order):
- * - `.vmpirc.json`, `.vmpirc.yaml`, `.vmpirc.yml`
+ * Searches for `.vmpirc.json`, `.vmpirc.yaml`, or `.vmpirc.yml` starting from
+ * the current working directory and walking up the file tree to the home
+ * directory.
  */
 export function loadConfig(): ResolvedConfig {
   const explorer = cosmiconfigSync('vmpi', {
     searchPlaces: ['.vmpirc.json', '.vmpirc.yaml', '.vmpirc.yml'],
+    searchStrategy: 'global',
   })
   const result = explorer.search()
   const file: VmpiConfig = result?.config ?? {}
