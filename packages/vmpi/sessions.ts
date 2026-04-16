@@ -67,21 +67,31 @@ export function prepareSessionsForVm(hostCwd: string, piConfigDir: string): void
  * Pi appends to session files in-place when continuing a session, so the VM
  * copy of an existing file may be larger than the host's original. Files are
  * moved when new (not on host) or replaced when the VM copy is larger (new
- * content was appended). Same-size copies — unchanged files that were only
- * mirrored for context — are left on the host as-is.
+ * content was appended). Same-size copies -- unchanged files that were only
+ * mirrored for context -- are left on the host as-is.
+ *
+ * `snapshotDir` is the temporary pi config snapshot that the VM wrote to
+ * (i.e. where `--workspace--` lives). `hostPiConfigDir` is the real host
+ * pi config dir (i.e. `~/.pi`) where sessions should be written back.
+ * When omitted, `hostPiConfigDir` defaults to `snapshotDir` (used in tests).
  *
  * This is a no-op when `hostCwd` is `/workspace` or if no `--workspace--`
  * directory exists.
  */
-export function collectSessionsFromVm(hostCwd: string, piConfigDir: string): void {
+export function collectSessionsFromVm(
+  hostCwd: string,
+  snapshotDir: string,
+  hostPiConfigDir: string = snapshotDir,
+): void {
   const hostDirName = cwdToSessionDirName(hostCwd)
   const vmDirName = cwdToSessionDirName('/workspace')
 
   if (hostDirName === vmDirName) return
 
-  const sessionsDir = join(piConfigDir, 'agent', 'sessions')
-  const hostSessionDir = join(sessionsDir, hostDirName)
-  const vmSessionDir = join(sessionsDir, vmDirName)
+  const snapshotSessionsDir = join(snapshotDir, 'agent', 'sessions')
+  const hostSessionsDir = join(hostPiConfigDir, 'agent', 'sessions')
+  const hostSessionDir = join(hostSessionsDir, hostDirName)
+  const vmSessionDir = join(snapshotSessionsDir, vmDirName)
 
   if (!existsSync(vmSessionDir)) return
 

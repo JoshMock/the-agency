@@ -480,7 +480,7 @@ async function cmdRun(args: string[]): Promise<void> {
     const result = await proc
 
     info('Collecting sessions from VM...')
-    collectSessionsFromVm(process.cwd(), piConfigSnapshotDir)
+    collectSessionsFromVm(process.cwd(), piConfigSnapshotDir, piConfigDir)
     cleanupSnapshot()
 
     process.exit(result.exitCode)

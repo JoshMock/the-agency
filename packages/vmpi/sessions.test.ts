@@ -213,4 +213,21 @@ describe('collectSessionsFromVm', () => {
 
     assert.ok(existsSync(vmSessionDir))
   })
+
+ it('writes session files to hostPiConfigDir when it differs from snapshotDir', () => {
+   const { piDir: snapshotDir, cleanup: cleanupSnapshot } = makeTmpPiDir()
+   try {
+     const { vmSessionDir } = sessionPaths(snapshotDir, '/home/alice/myproject')
+     const { hostSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
+     mkdirSync(vmSessionDir, { recursive: true })
+     writeFileSync(join(vmSessionDir, 'new-session.json'), '"new"')
+
+     collectSessionsFromVm('/home/alice/myproject', snapshotDir, piDir)
+
+     assert.ok(!existsSync(vmSessionDir), '--workspace-- removed from snapshot')
+     assert.ok(existsSync(join(hostSessionDir, 'new-session.json')), 'session written to real host config dir')
+   } finally {
+     cleanupSnapshot()
+   }
+ })
 })
