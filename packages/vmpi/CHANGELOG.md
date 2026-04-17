@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.5](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.4...vmpi-v0.1.5) (2026-04-17)
+
+
+### Bug Fixes
+
+* preserve session timestamps to make --continue deterministic ([#57](https://github.com/JoshMock/the-agency/issues/57)) ([ba06640](https://github.com/JoshMock/the-agency/commit/ba066403990537ca3d5a1e77338f875a4665e633))
+
 ## [0.1.4](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.3...vmpi-v0.1.4) (2026-04-16)
 
 

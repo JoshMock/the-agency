@@ -2,5 +2,5 @@
   "packages/hashline-edit": "0.2.1",
   "packages/tokenshrink": "0.1.2",
   "packages/spec-kit": "0.2.4",
-  "packages/vmpi": "0.1.4"
+  "packages/vmpi": "0.1.5"
 }
