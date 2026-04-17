@@ -12,6 +12,7 @@ import {
   loadConfig,
   resolveGuestPackages,
   DEFAULT_GUEST_PACKAGES,
+  resolveSecrets,
 } from './config.js'
 
 describe('resolveAllowedDomains', () => {
@@ -101,7 +102,7 @@ describe('resolvePolicy', () => {
 })
 
 describe('PROVIDER_DOMAINS', () => {
-  const knownProviders = ['github-copilot', 'gemini', 'openai', 'anthropic', 'ollama']
+  const knownProviders = ['github-copilot', 'gemini', 'openai', 'anthropic', 'ollama', 'github']
 
   it('contains all expected providers', () => {
     for (const p of knownProviders) {
@@ -286,6 +287,45 @@ describe('loadConfig', () => {
     assert.equal(cfg.memory, 4096)
   })
 
+  it('returns empty secrets object when no secrets configured', () => {
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.secrets, {})
+    assert.deepEqual(cfg.missingSecrets, [])
+  })
+
+  it('resolves a secret whose env var is present', () => {
+    process.env.VMPI_TEST_SECRET = 'hunter2'
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
+      secrets: { VMPI_TEST_SECRET: { hosts: ['api.example.com'] } },
+    }))
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.secrets, {
+      VMPI_TEST_SECRET: { hosts: ['api.example.com'], value: 'hunter2' },
+    })
+    delete process.env.VMPI_TEST_SECRET
+  })
+
+  it('populates missingSecrets when a secret env var is absent', () => {
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
+      secrets: { VMPI_NONEXISTENT_XYZ: { hosts: ['api.example.com'] } },
+    }))
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.secrets, {})
+    assert.deepEqual(cfg.missingSecrets, [{ name: 'VMPI_NONEXISTENT_XYZ', envVarName: 'VMPI_NONEXISTENT_XYZ' }])
+  })
+
+  it('reads secret value from the "env" override var when specified', () => {
+    process.env.VMPI_TEST_SECRET_A = 'alpha'
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
+      secrets: { GITHUB_TOKEN: { hosts: ['api.github.com'], env: 'VMPI_TEST_SECRET_A' } },
+    }))
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.secrets, {
+      GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'alpha' },
+    })
+    delete process.env.VMPI_TEST_SECRET_A
+  })
+
 })
 
 describe('resolveGuestPackages', () => {
@@ -376,5 +416,80 @@ describe('resolveLocalServices', () => {
       () => resolveLocalServices({ localServices: [{ hostname: 'x.local', port: 8080.5 }] }),
       /port.*must be an integer/,
     )
+  })
+})
+
+describe('resolveSecrets', () => {
+  it('returns empty object when no secrets config supplied', () => {
+    const { resolved, missing } = resolveSecrets(undefined, {})
+    assert.deepEqual(resolved, {})
+    assert.deepEqual(missing, [])
+  })
+
+  it('returns empty object for an empty secrets record', () => {
+    const { resolved, missing } = resolveSecrets({}, { SOME_VAR: 'value' })
+    assert.deepEqual(resolved, {})
+    assert.deepEqual(missing, [])
+  })
+
+  it('resolves a secret whose env var is present', () => {
+    const { resolved, missing } = resolveSecrets(
+      { GITHUB_TOKEN: { hosts: ['api.github.com'] } },
+      { GITHUB_TOKEN: 'ghp_abc123' },
+    )
+    assert.deepEqual(resolved, {
+      GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'ghp_abc123' },
+    })
+    assert.deepEqual(missing, [])
+  })
+
+  it('reports missing secret when env var is absent', () => {
+    const { resolved, missing } = resolveSecrets(
+      { MISSING_TOKEN: { hosts: ['api.example.com'] } },
+      {},
+    )
+    assert.deepEqual(resolved, {})
+    assert.deepEqual(missing, [{ name: 'MISSING_TOKEN', envVarName: 'MISSING_TOKEN' }])
+  })
+
+  it('returns only the present subset and reports missing when some secrets are absent', () => {
+    const { resolved, missing } = resolveSecrets(
+      {
+        TOKEN_A: { hosts: ['a.example.com'] },
+        TOKEN_B: { hosts: ['b.example.com'] },
+        TOKEN_C: { hosts: ['c.example.com'] },
+      },
+      { TOKEN_A: 'hello', TOKEN_C: 'world' },
+    )
+    assert.deepEqual(resolved, {
+      TOKEN_A: { hosts: ['a.example.com'], value: 'hello' },
+      TOKEN_C: { hosts: ['c.example.com'], value: 'world' },
+    })
+    assert.deepEqual(missing, [{ name: 'TOKEN_B', envVarName: 'TOKEN_B' }])
+  })
+
+  it('reads the value from a different host env var when "env" is set', () => {
+    const { resolved, missing } = resolveSecrets(
+      { GITHUB_TOKEN: { hosts: ['api.github.com'], env: 'MY_PAT' } },
+      { MY_PAT: 'ghp_xyz' },
+    )
+    assert.deepEqual(resolved, {
+      GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'ghp_xyz' },
+    })
+    assert.deepEqual(missing, [])
+  })
+
+  it('prefers the "env" var name over the key name when both are present', () => {
+    const { resolved } = resolveSecrets(
+      { GITHUB_TOKEN: { hosts: ['api.github.com'], env: 'MY_PAT' } },
+      { GITHUB_TOKEN: 'wrong', MY_PAT: 'correct' },
+    )
+    assert.equal(resolved.GITHUB_TOKEN?.value, 'correct')
+  })
+
+  it('preserves the hosts array on the resolved entry', () => {
+    const hosts = ['api.github.com', 'github.com']
+    const { resolved } = resolveSecrets({ GITHUB_TOKEN: { hosts } }, { GITHUB_TOKEN: 'tok' })
+    assert.deepEqual(resolved.GITHUB_TOKEN?.hosts, hosts)
   })
 })

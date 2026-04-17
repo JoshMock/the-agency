@@ -111,6 +111,20 @@ It searches for configuration files from your current directory up to the root d
 }
 ```
 
+To use the `gh` CLI inside the sandbox, add the `github` network preset and forward your token:
+
+```json
+{
+  "network": {
+    "providers": ["anthropic", "github"]
+  },
+  "guestPackages": ["github-cli"],
+  "secrets": {
+    "GITHUB_TOKEN": { "hosts": ["api.github.com", "github.com"] }
+  }
+}
+```
+
 ### Options
 
 | Key | Default | Description |
@@ -125,6 +139,7 @@ It searches for configuration files from your current directory up to the root d
 | `network.localServices` | `[]` | Host services to expose inside the VM. Each entry is `{ hostname, port }`. The VM can reach `hostname` at the given host `port` via a raw TCP tunnel. |
 | `rootfsExtraMb` | `128` | MiB to add to the Gondolin rootfs image during `vmpi setup` when free space is below this threshold. Increase this if setup fails with a disk-full error. |
 | `guestPackages` | `[]` | Extra Alpine packages to install in the guest during `vmpi setup`, in addition to the defaults: `git`, `fd`, `ripgrep`, `curl`, `jq`, `bash`, `python3`, `py3-pip`, `nodejs`, `npm`, `make`, `patch`, `file`, `sqlite`. |
+| `secrets` | `{}` | Secrets to inject into the VM, each scoped to specific hosts using [Gondolin's secret handling](https://earendil-works.github.io/gondolin/secrets/). Each key is the guest env var name. Value: `{ "hosts": ["api.github.com"] }`. Override the host-side var name with `"env"`: `{ "hosts": [...], "env": "MY_PAT" }`. Values are passed via a tmpfs env file and never written to persistent storage. |
 Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_DIR`, `VMPI_ROOTFS_EXTRA_MB`) override their config file equivalents.
 
 ### Built-in providers
@@ -136,6 +151,7 @@ Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_
 | `openai` | `api.openai.com` | [platform.openai.com/docs/api-reference](https://platform.openai.com/docs/api-reference/introduction) |
 | `anthropic` | `api.anthropic.com` | [docs.anthropic.com/en/api/getting-started](https://docs.anthropic.com/en/api/getting-started) |
 | `ollama` | `localhost`, `127.0.0.1` | (local service, no external network) |
+| `github` | `github.com`, `*.github.com`, `*.githubusercontent.com` | [about-githubs-ip-addresses](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses) |
 
 Multiple providers can be combined. Their domains are merged with any `allowedDomains`.
 

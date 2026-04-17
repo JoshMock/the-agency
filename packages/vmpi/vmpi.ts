@@ -286,36 +286,54 @@ async function buildPiBundle(): Promise<Buffer> {
 }
 
 /**
- * Builds the `httpHooks` option enforcing the configured network policy.
- * Returns `undefined` for `allow-all` (no hooks = unrestricted egress).
- * Returns hooks with an empty allowlist for `deny-all`.
- * Returns hooks with the configured domain list for `custom`.
+ * Builds the Gondolin HTTP hooks enforcing the configured network policy, and
+ * returns the `env` map that Gondolin produces from the secrets block.
  *
- * `localServices` hostnames are added to `allowedInternalHosts` so Gondolin's
- * internal-IP block does not reject connections to the mapped host ports.
+ * Gondolin's `secrets` parameter scopes each secret to a set of allowed hosts:
+ * the proxy injects the value only on requests to those hosts, and the returned
+ * `env` object contains the env vars to set inside the VM guest.
+ *
+ * For `allow-all` policy no hooks are created (unrestricted egress). Secrets
+ * are still resolved so their `env` values reach the guest.
  */
-function buildHttpHooks(): ReturnType<typeof createHttpHooks>['httpHooks'] | undefined {
+function buildHttpHooks(
+  secrets: Record<string, import('./config.js').ResolvedSecretEntry>,
+): { httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'] | undefined; guestEnv: Record<string, string> } {
   const { policy, allowedDomains, localServices } = getConfig().network
   const internalHostnames = localServices.map(s => s.hostname)
+  // We cast to `any` because the Gondolin type for `secrets` is not re-exported.
+  const gondolinSecrets: any = secrets
+  const hasSecrets = Object.keys(gondolinSecrets).length > 0
 
   if (policy === 'allow-all') {
     info('Network policy: allow-all (unrestricted)')
-    return undefined
+    // No httpHooks, but still expose the env vars in the guest.
+    const guestEnv = Object.fromEntries(Object.entries(secrets).map(([k, { value }]) => [k, value]))
+    return { httpHooks: undefined, guestEnv }
   }
+
+  const baseOpts: Record<string, unknown> = {
+    allowedHosts: policy === 'deny-all' ? [] : allowedDomains,
+  }
+  if (internalHostnames.length > 0) baseOpts.allowedInternalHosts = internalHostnames
+  if (hasSecrets) baseOpts.secrets = gondolinSecrets
 
   if (policy === 'deny-all') {
     info('Network policy: deny-all')
-    if (internalHostnames.length === 0) return createHttpHooks({ allowedHosts: [] }).httpHooks
-    // Even with deny-all, local services must still be reachable.
-    return createHttpHooks({ allowedHosts: [], allowedInternalHosts: internalHostnames }).httpHooks
+  } else {
+    info(`Network policy: custom (${allowedDomains.length} allowed domain(s)${internalHostnames.length > 0 ? `, ${internalHostnames.length} local service(s)` : ''})`)
   }
 
-  // custom
-  info(`Network policy: custom (${allowedDomains.length} allowed domain(s)${internalHostnames.length > 0 ? `, ${internalHostnames.length} local service(s)` : ''})`)
-  return createHttpHooks({
-    allowedHosts: allowedDomains,
-    allowedInternalHosts: internalHostnames,
-  }).httpHooks
+  const { httpHooks, env } = createHttpHooks(baseOpts as any)
+  return { httpHooks, guestEnv: (env ?? {}) as Record<string, string> }
+}
+
+/**
+ * Wraps a string in POSIX single-quotes, escaping any embedded single-quote
+ * characters. Safe to use in `/bin/sh` scripts.
+ */
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`
 }
 
 /**
@@ -402,8 +420,13 @@ async function cmdRun(args: string[]): Promise<void> {
     await cmdSetup()
   }
 
-  const { memory, cpus, piConfigDir, network: { localServices } } = getConfig()
-  const httpHooks = buildHttpHooks()
+  const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets } = getConfig()
+  const { httpHooks, guestEnv } = buildHttpHooks(secrets)
+
+  for (const { name, envVarName } of missingSecrets) {
+    const hint = name === envVarName ? `$${envVarName}` : `$${envVarName} (for guest var ${name})`
+    console.error(`[vmpi] warning: secret "${name}" is configured but ${hint} is not set on the host — it will not be injected into the VM`)
+  }
 
   // Build tcp.hosts map and dns config for any local services.
   // Gondolin's tcp.hosts tunnels raw TCP from a synthetic guest hostname to a
@@ -472,11 +495,24 @@ async function cmdRun(args: string[]): Promise<void> {
     console.error('')
 
     const piArgs = args.map(a => JSON.stringify(a)).join(' ')
+
+    // Inject secrets into the VM by writing a tmpfs env file and sourcing it.
+    // `guestEnv` comes from Gondolin's `createHttpHooks`, which scopes each
+    // secret to its declared host allowlist at the proxy layer. The file is
+    // on /tmp (tmpfs) so values are never written to persistent storage.
+    const guestEnvEntries = Object.entries(guestEnv)
+    if (guestEnvEntries.length > 0) {
+      const names = guestEnvEntries.map(([k]) => k).join(', ')
+      info(`Injecting ${guestEnvEntries.length} secret(s) into VM: ${names}`)
+      const lines = guestEnvEntries.map(([k, v]) => `export ${k}=${shellQuote(v)}`).join('\n')
+      await vm.fs.writeFile('/tmp/.vmpi-secrets', Buffer.from(lines + '\n', 'utf8'))
+    }
+
+    const secretsPreamble = guestEnvEntries.length > 0 ? '. /tmp/.vmpi-secrets && ' : ''
     const proc = vm.shell({
-      command: ['/bin/sh', '-c', `cd /workspace && pi ${piArgs}; exit $?`],
+      command: ['/bin/sh', '-c', `${secretsPreamble}cd /workspace && pi ${piArgs}; exit $?`],
       attach: true,
     })
-
     const result = await proc
 
     info('Collecting sessions from VM...')
@@ -502,19 +538,24 @@ Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
   piConfigDir     pi config dir on host       (env: PI_CONFIG_DIR,  default: ~/.pi)
   stateDir        vmpi state dir on host      (env: VMPI_STATE_DIR, default: ~/.vmpi)
   network.policy                allow-all | deny-all | custom (inferred when providers/domains set)
-  network.providers             LLM providers: github-copilot, gemini, openai, anthropic, ollama
+  network.providers             Built-in presets: github-copilot, gemini, openai, anthropic, ollama, github
   network.allowedDomains        Additional domain patterns to allow
   network.localServices         Host services to expose inside the VM:
                                   [{ "hostname": "my-api.local", "port": 8080 }]
-                                Connect inside the VM as http://my-api.local:8080
+  secrets                       Secrets to forward into the VM, scoped to specific hosts.
+                                Each key is the guest env var name:
+                                  { "GITHUB_TOKEN": { "hosts": ["api.github.com"] } }
+                                Override the host-side var name with "env":
+                                  { "GITHUB_TOKEN": { "hosts": ["api.github.com"], "env": "MY_PAT" } }
 
-Example .vmpirc.json:
+Example .vmpirc.json (using the gh CLI with a GitHub token):
   {
-    "memory": 512,
     "network": {
-      "providers": ["github-copilot", "anthropic"],
-      "allowedDomains": ["my-llm.example.com"],
-      "localServices": [{ "hostname": "ollama.local", "port": 11434 }]
+      "providers": ["anthropic", "github"]
+    },
+    "guestPackages": ["github-cli"],
+    "secrets": {
+      "GITHUB_TOKEN": { "hosts": ["api.github.com", "github.com"] }
     }
   }
 `
