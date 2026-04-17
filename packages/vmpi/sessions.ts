@@ -1,5 +1,20 @@
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmSync, statSync, unlinkSync } from 'node:fs'
 import { join } from 'node:path'
+
+/**
+ * Moves a file from `src` to `dest`, falling back to a copy-then-unlink when
+ * the two paths reside on different filesystems. `rename(2)` raises EXDEV when
+ * crossing a mount boundary (e.g. /tmp on tmpfs to ~/.pi on ext4).
+ */
+function moveFile(src: string, dest: string): void {
+  try {
+    renameSync(src, dest)
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code !== 'EXDEV') throw err
+    copyFileSync(src, dest)
+    unlinkSync(src)
+  }
+}
 
 /**
  * Converts an absolute filesystem path to the session directory name format
@@ -106,7 +121,7 @@ export function collectSessionsFromVm(
     const src = join(vmSessionDir, file)
     const dest = join(hostSessionDir, file)
     if (!existsSync(dest) || statSync(src).size > statSync(dest).size) {
-      renameSync(src, dest)
+      moveFile(src, dest)
     }
   }
   rmSync(vmSessionDir, { recursive: true, force: true })
