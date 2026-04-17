@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.5...vmpi-v0.2.0) (2026-04-17)
+
+
+### Features
+
+* secret passthrough support ([#60](https://github.com/JoshMock/the-agency/issues/60)) ([576d570](https://github.com/JoshMock/the-agency/commit/576d570541a280e074b27db73be7b61e8a4366f9))
+
+
+### Bug Fixes
+
+* avoid EXDEV error on session sync ([#62](https://github.com/JoshMock/the-agency/issues/62)) ([af7b439](https://github.com/JoshMock/the-agency/commit/af7b439ec2e87dd751da802ed773640fa1494b4f))
+
 ## [0.1.5](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.4...vmpi-v0.1.5) (2026-04-17)
 
 
