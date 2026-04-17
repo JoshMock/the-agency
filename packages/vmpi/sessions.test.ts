@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -114,6 +114,30 @@ describe('prepareSessionsForVm', () => {
     assert.ok(existsSync(vmSessionDir))
     assert.ok(!lstatSync(vmSessionDir).isSymbolicLink())
     assert.ok(existsSync(join(vmSessionDir, 'session-1.json')))
+  })
+
+  it('preserves file modification times so --continue picks the right session', () => {
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
+    mkdirSync(hostSessionDir, { recursive: true })
+
+    const oldFile = join(hostSessionDir, 'old-session.jsonl')
+    const newFile = join(hostSessionDir, 'new-session.jsonl')
+    writeFileSync(oldFile, '{"old": true}')
+    writeFileSync(newFile, '{"new": true}')
+
+    const oldTime = new Date('2024-01-01T00:00:00Z')
+    const newTime = new Date('2025-06-15T12:00:00Z')
+    utimesSync(oldFile, oldTime, oldTime)
+    utimesSync(newFile, newTime, newTime)
+
+    prepareSessionsForVm('/home/alice/myproject', piDir)
+
+    const copiedOld = statSync(join(vmSessionDir, 'old-session.jsonl'))
+    const copiedNew = statSync(join(vmSessionDir, 'new-session.jsonl'))
+    assert.ok(
+      copiedNew.mtimeMs > copiedOld.mtimeMs,
+      `newer session mtime (${copiedNew.mtimeMs}) should be greater than older session mtime (${copiedOld.mtimeMs})`,
+    )
   })
 
   it('is a no-op when host CWD is /workspace', () => {

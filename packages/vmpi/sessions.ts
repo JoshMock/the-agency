@@ -56,7 +56,7 @@ export function prepareSessionsForVm(hostCwd: string, piConfigDir: string): void
   mkdirSync(sessionsDir, { recursive: true })
 
   if (!existsSync(vmSessionDir)) {
-    cpSync(hostSessionDir, vmSessionDir, { recursive: true })
+    cpSync(hostSessionDir, vmSessionDir, { recursive: true, preserveTimestamps: true })
   }
 }
 

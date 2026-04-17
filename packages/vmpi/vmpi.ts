@@ -425,7 +425,7 @@ async function cmdRun(args: string[]): Promise<void> {
   const cleanupSnapshot = () => {
     try { rmSync(piConfigSnapshotDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
-  cpSync(piConfigDir, piConfigSnapshotDir, { recursive: true })
+  cpSync(piConfigDir, piConfigSnapshotDir, { recursive: true, preserveTimestamps: true })
 
   info(`Resuming sandbox VM from checkpoint...`)
   const checkpoint = VmCheckpoint.load(checkpointFile())
