@@ -48,6 +48,9 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
     '*.github.com',
     '*.githubusercontent.com',
   ],
+  'openrouter': [
+    'api.openrouter.ai'
+  ],
 }
 
 /** A single host-to-local-port mapping for the `localServices` config option. */
