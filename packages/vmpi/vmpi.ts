@@ -510,6 +510,7 @@ async function cmdRun(args: string[]): Promise<void> {
 
     const secretsPreamble = guestEnvEntries.length > 0 ? '. /tmp/.vmpi-secrets && ' : ''
     const proc = vm.shell({
+      env: ["TERM=xterm-256color"],
       command: ['/bin/sh', '-c', `${secretsPreamble}cd /workspace && pi ${piArgs}; exit $?`],
       attach: true,
     })
