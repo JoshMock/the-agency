@@ -134,16 +134,20 @@ async function ensureRootfsHeadroom(): Promise<void> {
 }
 
 /**
+/**
  * Returns `sandbox` options shared by all VM.create() calls:
  * - forces `q35` machine type on Linux x86_64 to fix Gondolin's broken
  *   `microvm` default (which has no PCI bus but generates PCI device args)
  * - enables network debug logging when `--debug` is passed
+ * - sets `console: 'none'` so QEMU uses `-serial null` instead of `-serial stdio`,
+ *   keeping the Node.js event loop free and the Pi TUI responsive
  */
 function sandboxOptions(): VMOptions['sandbox'] {
   const opts: VMOptions['sandbox'] = {}
   if (process.platform === 'linux' && process.arch === 'x64') {
     opts.machineType = 'q35'
   }
+  opts.console = 'none'
   return opts
 }
 
