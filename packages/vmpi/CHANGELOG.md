@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.2.0...vmpi-v0.3.0) (2026-04-29)
+
+
+### Features
+
+* add openrouter support to vmpi ([#63](https://github.com/JoshMock/the-agency/issues/63)) ([6a50782](https://github.com/JoshMock/the-agency/commit/6a50782299d00f54f8d5ca96681cc254302a3199))
+
+
+### Bug Fixes
+
+* adjust TTY output so sleeping QEMU process does not lock TUI ([#66](https://github.com/JoshMock/the-agency/issues/66)) ([d0e5787](https://github.com/JoshMock/the-agency/commit/d0e57876fdc64fde4234ab1927695ad67f9887e5))
+* force TERM=xterm-256color ([#65](https://github.com/JoshMock/the-agency/issues/65)) ([cb4a43c](https://github.com/JoshMock/the-agency/commit/cb4a43c79b4af423dd9f68dcbb48e0f9a728519b))
+
 ## [0.2.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.1.5...vmpi-v0.2.0) (2026-04-17)
 
 
