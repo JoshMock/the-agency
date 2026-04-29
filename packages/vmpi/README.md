@@ -86,7 +86,7 @@ Every `vmpi` invocation:
 1. Downloads the pi tarball on the host (cached in `~/.vmpi/cache/`)
 2. Boots a fresh VM and writes the tarball into it
 3. Runs `npm install -g` inside the VM
-4. Creates a qcow2 disk checkpoint at `~/.vmpi/base-checkpoint.qcow2`
+4. Creates a disk checkpoint at `~/.vmpi/base-checkpoint.qcow2`
 
 ## Configuration
 
@@ -158,9 +158,7 @@ Multiple providers can be combined. Their domains are merged with any `allowedDo
 ## How it works
 
 Gondolin manages QEMU microVMs with a JavaScript-implemented network stack and VFS.
-`vmpi setup` builds a **base checkpoint** by installing pi into a fresh VM and saving
-a qcow2 disk snapshot. Each `vmpi` run resumes from that checkpoint in ~1 s, then
-mounts the workspace and `~/.pi` via VFS providers (`RealFSProvider`).
+`vmpi setup` builds a **base checkpoint** by installing pi, along with any extensions listed in your `~/.pi/agent/settings.json`, into a fresh VM and saving a disk snapshot. Each `vmpi` run resumes from that checkpoint, then mounts the workspace and `~/.pi` via VFS providers (`RealFSProvider`).
 
 The pi tarball is downloaded on the host (not inside the VM) because Gondolin's
 MITM proxy does not reliably handle large concurrent streaming downloads. The
@@ -189,21 +187,12 @@ Gondolin's QEMU backend runs entirely in userspace; no TAP devices, no nftables
 rules, no setuid jailer. `vmpi` runs as your normal user as long as `/dev/kvm`
 is group-readable (the default on most Linux distros with KVM enabled).
 
-### Machine type workaround
-
-On Linux x86_64, Gondolin selects `microvm` as the QEMU machine type, but
-generates `-device virtio-*-pci` arguments that require a PCI bus. `microvm`
-has no PCI bus, so QEMU crashes immediately. vmpi forces `q35` (a modern PCIe
-chipset) via `sandbox: { machineType: 'q35' }` as a workaround.
-
 ## Limitations
 
 - **Linux x86_64 only:** macOS and aarch64 are untested. The `q35` machine type
   workaround is specific to Linux x86_64; other platforms may need adjustments.
-- **First run is slow:** `vmpi setup` downloads the Gondolin guest image (~300 MB),
-  downloads the pi tarball (~4 MB), and runs `npm install` inside the VM (~60s total).
-  Subsequent runs resume from the checkpoint in ~1 s.
-- **Rootfs free space:** Gondolin's Alpine rootfs image has limited free space (~79 MiB). `vmpi setup` automatically grows the image by `rootfsExtraMb` MiB (default: 128) using `qemu-img resize` + `e2fsck` + `resize2fs` whenever free space is below that threshold. This requires `e2fsprogs` (`sudo apt install e2fsprogs` / `sudo pacman -S e2fsprogs`). If setup still fails with a disk-full error, increase `rootfsExtraMb` in your `.vmpirc.json` or via `VMPI_ROOTFS_EXTRA_MB`.
-- **Session directory is tmpfs:** `/root`, `/tmp`, and `/var/log` are tmpfs-backed in
-  the guest. Sessions under `/root/.pi` are visible on the host via the VFS mount and
-  are not lost when the VM closes.
+- **First run is slow:** `vmpi setup` downloads the Gondolin guest image (\~300 MB),
+  downloads the pi tarball (\~4 MB), and runs `npm install` inside the VM. Subsequent runs are much faster as they resume from the checkpoint created during setup.
+- **Rootfs free space:** Gondolin's Alpine rootfs image has limited free space (~79 MiB). `vmpi setup` automatically grows the image by `rootfsExtraMb` MiB (default: 128) whenever free space is below that threshold. This requires `e2fsprogs` (`sudo apt install e2fsprogs` / `sudo pacman -S e2fsprogs`). If setup still fails with a "disk full" error, increase `rootfsExtraMb` in your `.vmpirc.json` or via `VMPI_ROOTFS_EXTRA_MB`.
+- **Session directory is tmpfs:** `/root`, `/tmp`, and `/var/log` are tmpfs-backed in the guest and will be dropped from memory on quit. Sessions under `/root/.pi` are visible on the host via the VFS mount and are not lost when the VM closes.
+- **Ctrl-Z does not background vmpi:** In a regular terminal, pressing `Ctrl-Z` suspends Pi. This does not work with `vmpi`. As a workaround, run `vmpi` inside [tmux](https://github.com/tmux/tmux), [screen](https://www.gnu.org/software/screen/), or [Zellij](https://zellij.dev).
