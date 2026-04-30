@@ -13,12 +13,26 @@ import {
   createHttpHooks,
   type VMOptions,
   type DebugComponent,
+  type HttpIpAllowInfo,
 } from '@earendil-works/gondolin'
 import { loadConfig, type ResolvedConfig } from './config.js'
 import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.js'
 
 let _config: ResolvedConfig | undefined
 let debugMode = false
+
+/**
+ * Tracks hostnames the VM attempted to reach but were denied by the network
+ * policy. Populated in --debug mode only. null when debug audit is inactive.
+ */
+let debugDeniedHosts: Set<string> | null = null
+
+/**
+ * Tracks executables the VM attempted to run but could not find.
+ * Populated in --debug mode only. null when debug audit is inactive.
+ */
+let debugMissingExes: Set<string> | null = null
+
 
 /** Lazily loads and caches the resolved configuration. */
 function getConfig(): ResolvedConfig {
@@ -321,7 +335,6 @@ function buildHttpHooks(
   }
   if (internalHostnames.length > 0) baseOpts.allowedInternalHosts = internalHostnames
   if (hasSecrets) baseOpts.secrets = gondolinSecrets
-
   if (policy === 'deny-all') {
     info('Network policy: deny-all')
   } else {
@@ -329,6 +342,16 @@ function buildHttpHooks(
   }
 
   const { httpHooks, env } = createHttpHooks(baseOpts as any)
+
+  if (debugDeniedHosts != null) {
+    const inner = httpHooks.isIpAllowed
+    httpHooks.isIpAllowed = async (info: HttpIpAllowInfo) => {
+      const allowed = inner == null ? true : await inner(info)
+      if (!allowed) debugDeniedHosts!.add(info.hostname)
+      return allowed
+    }
+  }
+
   return { httpHooks, guestEnv: (env ?? {}) as Record<string, string> }
 }
 
@@ -416,6 +439,27 @@ function cmdStatus(): void {
   }
 }
 
+/**
+ * Prints the debug audit report to stdout after a pi session ends.
+ * Lists any hostnames the VM was denied access to and any executables it
+ * tried to invoke but could not find. Called only in --debug mode.
+ */
+function printDebugAudit(): void {
+  const deniedList = debugDeniedHosts != null ? [...debugDeniedHosts].sort() : []
+  const missingList = debugMissingExes != null ? [...debugMissingExes].sort() : []
+  if (deniedList.length === 0 && missingList.length === 0) return
+  console.log('')
+  console.log('[vmpi debug audit]')
+  if (missingList.length > 0) {
+    console.log('  missing executables (attempted but not found):')
+    for (const exe of missingList) console.log(`    ${exe}`)
+  }
+  if (deniedList.length > 0) {
+    console.log('  blocked hostnames (attempted but denied by network policy):')
+    for (const host of deniedList) console.log(`    ${host}`)
+  }
+}
+
 /** Runs pi in a sandboxed VM resumed from the base checkpoint. */
 async function cmdRun(args: string[]): Promise<void> {
   checkPrerequisites()
@@ -495,6 +539,21 @@ async function cmdRun(args: string[]): Promise<void> {
       'ln -sf /tmp/lib/node_modules/.bin/pi /usr/bin/pi',
     ].join(' && '))
 
+    if (debugMode) {
+      debugDeniedHosts = new Set()
+      debugMissingExes = new Set()
+      // Write a bash init script that records any command the shell cannot find.
+      // BASH_ENV is sourced by bash for every non-interactive invocation, which
+      // covers all `bash -c` calls that pi makes for its bash tool.
+      const initScript = [
+        'command_not_found_handle() {',
+        '  printf "%s\\n" "$1" >> /tmp/vmpi-debug-missing-exes.log',
+        '  return 127',
+        '}',
+      ].join('\n')
+      await vm.fs.writeFile('/tmp/vmpi-init.sh', Buffer.from(initScript + '\n', 'utf8'))
+    }
+
     info("Launching pi in sandbox (type 'exit' or Ctrl-D to quit)...")
     console.error('')
 
@@ -514,11 +573,25 @@ async function cmdRun(args: string[]): Promise<void> {
 
     const secretsPreamble = guestEnvEntries.length > 0 ? '. /tmp/.vmpi-secrets && ' : ''
     const proc = vm.shell({
-      env: ["TERM=xterm-256color"],
+      env: [
+        'TERM=xterm-256color',
+        ...(debugMode ? ['BASH_ENV=/tmp/vmpi-init.sh'] : []),
+      ],
       command: ['/bin/sh', '-c', `${secretsPreamble}cd /workspace && pi ${piArgs}; exit $?`],
       attach: true,
     })
     const result = await proc
+
+    if (debugMode) {
+      try {
+        const logBuf = await vm.fs.readFile('/tmp/vmpi-debug-missing-exes.log')
+        const lines = logBuf.toString('utf8').split('\n').filter((l: string) => l.trim() !== '')
+        for (const line of lines) debugMissingExes!.add(line.trim())
+      } catch {
+        // File absent when no missing-executable events occurred.
+      }
+      printDebugAudit()
+    }
 
     info('Collecting sessions from VM...')
     collectSessionsFromVm(process.cwd(), piConfigSnapshotDir, piConfigDir)
