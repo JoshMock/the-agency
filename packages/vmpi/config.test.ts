@@ -268,6 +268,17 @@ describe('loadConfig', () => {
     }
   })
 
+  it('returns empty postSetupHooks when not configured', () => {
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.postSetupHooks, [])
+  })
+
+  it('passes postSetupHooks from config file through unchanged', () => {
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ postSetupHooks: ['npm install -g typescript', 'gem install rails'] }))
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.postSetupHooks, ['npm install -g typescript', 'gem install rails'])
+  })
+
   it('finds config file in a parent directory', () => {
     const subDir = join(tmpDir, 'nested', 'child')
     mkdirSync(subDir, { recursive: true })

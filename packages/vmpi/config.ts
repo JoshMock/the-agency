@@ -178,6 +178,15 @@ export interface VmpiConfig {
   guestPackages?: string[]
 
   /**
+   * Shell commands to run inside the VM after packages are installed, before
+   * the base checkpoint is saved. Each command is executed via `/bin/sh -c`.
+   * A non-zero exit code aborts setup. Useful for installing language-specific
+   * tools that are not available as Alpine packages, e.g.:
+   * `["npm install -g typescript", "gem install rails"]`.
+   */
+  postSetupHooks?: string[]
+
+  /**
    * Secrets to inject into the VM at runtime.
    * Each key is the env var name set inside the VM; the value object specifies
    * the allowed hosts and the host-side env var to read from.
@@ -209,6 +218,8 @@ export interface ResolvedConfig {
   rootfsExtraMb: number
   /** Alpine packages to install in the guest (defaults + user extras). */
   guestPackages: string[]
+  /** Shell commands to run after package installation, before checkpointing. */
+  postSetupHooks: string[]
   network: ResolvedNetwork
   /**
    * Resolved secrets ready to pass to Gondolin's `createHttpHooks`.
@@ -387,6 +398,7 @@ export function loadConfig(): ResolvedConfig {
   const policy = resolvePolicy(file.network, allowedDomains)
   const localServices = resolveLocalServices(file.network)
   const guestPackages = resolveGuestPackages(file.guestPackages)
+  const postSetupHooks = file.postSetupHooks ?? []
   const { resolved: secrets, missing: missingSecrets } = resolveSecrets(file.secrets)
 
   if (policy === 'deny-all' && allowedDomains.length > 0) {
@@ -396,7 +408,7 @@ export function loadConfig(): ResolvedConfig {
     )
   }
 
-  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, secrets, missingSecrets, network: { policy, allowedDomains, localServices } }
+  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, network: { policy, allowedDomains, localServices } }
 }
 
 /** Parses a string as a number, returning undefined for missing/NaN values. */

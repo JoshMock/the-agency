@@ -182,7 +182,7 @@ function debugLog(): VMOptions['debugLog'] {
  * In debug mode both streams are shown, prefixed with [stdout]/[stderr].
  * Throws if the command exits with a non-zero code.
  */
-async function vmExec(vm: VM, cmd: string): Promise<void> {
+async function vmExec(vm: VM, cmd: string, { forwardStdout = true }: { forwardStdout?: boolean } = {}): Promise<void> {
   // Use array form (/bin/sh -c) rather than string form (/bin/sh -lc) because
   // the Alpine login shell doesn't populate PATH, so `npm`, `pi`, etc. are not
   // found when using the login-shell string shorthand.
@@ -192,6 +192,8 @@ async function vmExec(vm: VM, cmd: string): Promise<void> {
       process.stderr.write(`[${stream}] ${text}`)
     } else if (stream === 'stderr') {
       process.stderr.write(text)
+    } else if (stream === 'stdout' && forwardStdout) {
+      process.stdout.write(text)
     }
   }
   const result = await proc
@@ -376,15 +378,20 @@ async function cmdSetup(): Promise<void> {
   mkdirSync(getConfig().stateDir, { recursive: true })
 
   const piBundle = await buildPiBundle()
-  const { memory, cpus, guestPackages } = getConfig()
+  const { memory, cpus, guestPackages, postSetupHooks } = getConfig()
 
   // `cow` rootfs mode requires `qemu-img`; `memory` uses QEMU's built-in
   // snapshot mode and needs no extra tooling. We use `cow` here because we
   // are about to checkpoint the disk.
+  // Allow-all HTTP hooks so post-setup hooks (e.g. `npm install -g …`) can
+  // reach the internet. Setup runs under host control, not sandboxed pi, so
+  // the user's runtime network policy does not apply here.
+  const { httpHooks: setupHttpHooks } = createHttpHooks({ allowedHosts: undefined } as any)
   const vm = await VM.create({
     sandbox: sandboxOptions(),
     memory: `${memory}M`,
     cpus,
+    httpHooks: setupHttpHooks,
     startTimeoutMs: 0,
     debugLog: debugLog(),
   })
@@ -408,6 +415,14 @@ async function cmdSetup(): Promise<void> {
 
     info(`Installing guest packages: ${guestPackages.join(', ')}...`)
     await vm.exec(['/bin/sh', '-c', `apk add --no-cache ${guestPackages.join(' ')}`])
+
+    if (postSetupHooks.length > 0) {
+      info(`Running ${postSetupHooks.length} post-setup hook(s)...`)
+      for (const cmd of postSetupHooks) {
+        info(`  $ ${cmd}`)
+        await vmExec(vm, cmd)
+      }
+    }
 
     info('Creating base checkpoint...')
     const checkpoint = await vm.checkpoint(checkpointFile())
@@ -537,7 +552,7 @@ async function cmdRun(args: string[]): Promise<void> {
       'tar xzf /opt/pi-modules.tgz -C /tmp/lib/',
       'npm config set prefix /tmp',
       'ln -sf /tmp/lib/node_modules/.bin/pi /usr/bin/pi',
-    ].join(' && '))
+    ].join(' && '), { forwardStdout: false })
 
     if (debugMode) {
       debugDeniedHosts = new Set()
