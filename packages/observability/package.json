@@ -7,7 +7,8 @@
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
-    "test": "node --experimental-transform-types --test index.test.ts"
+    "test": "node --experimental-transform-types --test index.test.ts",
+    "etl": "node --experimental-transform-types pi-sessions-to-otel.ts"
   },
   "pi": {
     "extensions": [

@@ -1,612 +1,397 @@
 /**
  * Pi Observability Extension
  *
- * Records a JSONL timeseries of tool calls, agent turns, model changes, token
- * usage, and session lifecycle to ~/.pi/observability/<date>-<sessionId>.jsonl.
- * Each record is written asynchronously so it never blocks the session.
+ * Emits one OTel GenAI-compatible JSONL document per assistant turn, matching
+ * the schema produced by pi-sessions-to-otel.ts so both sources index into the
+ * same Elasticsearch index without mapping conflicts.
  *
- * The extension also exposes:
- *   - /observe           – show current output file and session stats
- *   - /observe tags      – trigger AI tagging for the current session now
- *   - observe_analyze    – tool the LLM can call to build per-session analysis
- *                          from any JSONL file
+ * Additional fields captured at runtime that the offline ETL cannot provide:
+ *   - pi.session.skills          – names of every skill loaded at prompt time
+ *   - pi.session.skill_paths     – filesystem paths of loaded skills
+ *   - pi.session.tools           – names of all active tools
+ *   - pi.session.tool_sources    – source metadata (builtin / extension / sdk)
+ *   - pi.session.commands        – slash commands registered at prompt time
+ *   - pi.turn.exchange_id        – stable ID grouping one user prompt + all its
+ *                                  assistant turns (set on before_agent_start,
+ *                                  shared across every turn in that exchange)
+ *   - pi.response_id             – provider response ID (used as ES _id)
  *
- * JSONL record types (all include @timestamp, sessionId, sessionFile, cwd):
- *   session_start   – fired once when the session opens
- *   session_end     – fired on shutdown with aggregate totals
- *   turn_start      – fired at the start of each LLM turn
- *   turn_end        – fired at the end of each LLM turn with token counts
- *   tool_call       – fired for every tool execution with duration + error flag
- *   model_change    – fired when the active model changes
- *   command         – fired when user runs a /command
- *   session_tags    – AI-generated tags for the session (async, best-effort)
+ * Output goes to a configurable sink (handled separately).
+ *
+ * Semantic conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
  */
 
-import { complete } from '@mariozechner/pi-ai'
-import type { ExtensionAPI } from '@mariozechner/pi-coding-agent'
-import { Type } from '@sinclair/typebox'
+import type {
+  AssistantMessage,
+  ToolResultMessage,
+} from '@mariozechner/pi-ai'
+import type {
+  BuildSystemPromptOptions,
+  ExtensionAPI,
+  Skill,
+  ToolInfo,
+} from '@mariozechner/pi-coding-agent'
 import * as crypto from 'node:crypto'
-import * as fs from 'node:fs'
-import * as os from 'node:os'
-import * as path from 'node:path'
 
-// ─── Record types ─────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
-/** Fields present on every JSONL record. */
-interface BaseRecord {
-  /** Discriminator. */
-  type: string
-  /** ISO-8601 timestamp when the record was emitted. */
-  '@timestamp': string
-  /** Unique ID for this Pi session.  Stable across /reload; changes on /new. */
-  sessionId: string
-  /** Absolute path to the .pi session file, or null for ephemeral sessions. */
-  sessionFile: string | null
-  /** Working directory at the time of the event. */
-  cwd: string
+/** Extracted tool call for the span document. */
+interface SpanToolCall {
+  id: string
+  name: string
+  arguments: Record<string, unknown>
+  arguments_text: string
 }
 
-interface SessionStartRecord extends BaseRecord {
-  type: 'session_start'
+/** Extracted tool result for the span document. */
+interface SpanToolResult {
+  tool_call_id: string
+  tool_name: string
+  output: string
 }
 
-interface SessionEndRecord extends BaseRecord {
-  type: 'session_end'
-  /** Wall-clock duration of the whole session in milliseconds. */
-  durationMs: number
-  totalTurns: number
-  totalToolCalls: number
-  totalTokensIn: number
-  totalTokensOut: number
-  model: string | null
-  provider: string | null
+/** Result of extracting content from an assistant message. */
+interface ExtractedAssistantContent {
+  text: string | undefined
+  thinking: string | undefined
+  toolCalls: SpanToolCall[]
 }
 
-interface TurnStartRecord extends BaseRecord {
-  type: 'turn_start'
-  /** Groups the turn_start, turn_end, and tool_call records for this turn. */
-  turnId: string
-  turnIndex: number
-  model: string
-  provider: string
-}
-
-interface TurnEndRecord extends BaseRecord {
-  type: 'turn_end'
-  turnId: string
-  turnIndex: number
-  /** Wall-clock duration from turn_start to turn_end in milliseconds. */
-  durationMs: number
-  tokensIn: number | null
-  tokensOut: number | null
-  toolCallCount: number
-}
-
-interface ToolCallRecord extends BaseRecord {
-  type: 'tool_call'
-  turnId: string
-  toolCallId: string
-  toolName: string
-  /** Wall-clock execution time in milliseconds. */
-  durationMs: number
-  isError: boolean
-  /** First 300 chars of JSON-serialised tool arguments. */
-  argsSummary: string
-}
-
-interface ModelChangeRecord extends BaseRecord {
-  type: 'model_change'
-  model: string
-  provider: string
-  previousModel: string | null
-  previousProvider: string | null
-  /** "set" | "cycle" | "restore" */
+/** Metadata about a loaded skill, trimmed for ES storage. */
+interface SkillMeta {
+  name: string
+  path: string
   source: string
+  scope: string
 }
 
-interface CommandRecord extends BaseRecord {
-  type: 'command'
-  command: string
-  args: string
+/** Metadata about an active tool, trimmed for ES storage. */
+interface ToolMeta {
+  name: string
+  source: string
+  scope: string
 }
-
-interface SessionTagsRecord extends BaseRecord {
-  type: 'session_tags'
-  tags: string[]
-  summary: string
-  taggingModel: string
-}
-
-type ObsRecord =
-  | SessionStartRecord
-  | SessionEndRecord
-  | TurnStartRecord
-  | TurnEndRecord
-  | ToolCallRecord
-  | ModelChangeRecord
-  | CommandRecord
-  | SessionTagsRecord
-
-// ─── Async JSONL writer ───────────────────────────────────────────────────────
 
 /**
- * Non-blocking JSONL writer.
- *
- * Records are serialised synchronously (cheap string work) then pushed onto a
- * queue.  A `setImmediate`-driven drain loop handles all I/O so the calling
- * thread is never blocked waiting for disk.
+ * One OTel GenAI span document, emitted per assistant turn.
+ * Schema matches pi-sessions-to-otel.ts output exactly for fields shared
+ * between both sources.
  */
-class AsyncJSONLWriter {
-  private queue: string[] = []
-  private draining = false
-  private fd: number | null = null
-  private filePath: string | null = null
+interface SpanDocument {
+  [key: string]: unknown
+  '@timestamp': string
+  'span.id': string
+  'trace.id': string
+  'span.name': string
+}
 
-  /** Open (or create) the output file.  Synchronous so the path is ready immediately. */
-  open(filePath: string): void {
-    const dir = path.dirname(filePath)
-    fs.mkdirSync(dir, { recursive: true })
-    this.fd = fs.openSync(filePath, 'a')
-    this.filePath = filePath
+// ─── Provider → gen_ai.system mapping ────────────────────────────────────────
+
+const PROVIDER_TO_SYSTEM: Record<string, string> = {
+  anthropic: 'anthropic',
+  'github-copilot': 'anthropic',
+  openai: 'openai',
+  azure: 'azure.openai',
+  bedrock: 'aws.bedrock',
+  google: 'google_ai_studio',
+  vertex: 'vertex_ai',
+  litellm: 'anthropic',
+  ollama: 'ollama',
+  cursor: 'openai',
+}
+
+/** Map a pi provider + model hint to an OTel gen_ai.system value. */
+export function inferSystem (provider: string, model: string): string {
+  const p = provider.toLowerCase()
+  const m = model.toLowerCase()
+  for (const [k, v] of Object.entries(PROVIDER_TO_SYSTEM)) {
+    if (p.includes(k)) {
+      if (k === 'github-copilot' && (m.includes('gpt') || m.includes('o1') || m.includes('o3'))) return 'openai'
+      return v
+    }
   }
+  if (m.includes('claude')) return 'anthropic'
+  if (m.includes('gpt') || m.includes('o1') || m.includes('o3')) return 'openai'
+  if (m.includes('gemini')) return 'google_ai_studio'
+  return provider || 'unknown'
+}
 
-  /** Enqueue a record.  Returns immediately; never throws. */
-  write(record: ObsRecord): void {
-    try {
-      this.queue.push(JSON.stringify(record) + '\n')
-      if (!this.draining) this.scheduleDrain()
-    } catch {
-      // serialisation errors are silently swallowed
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Extract text blocks from an assistant message, returning the joined text
+ * and thinking content as separate strings.
+ */
+export function extractAssistantText (msg: AssistantMessage): ExtractedAssistantContent {
+  const textParts: string[] = []
+  const thinkingParts: string[] = []
+  const toolCalls: SpanToolCall[] = []
+
+  for (const block of msg.content) {
+    if (block.type === 'text') {
+      const t = block.text.trim()
+      if (t.length > 0) textParts.push(t)
+    } else if (block.type === 'thinking') {
+      const t = (block as { type: 'thinking'; thinking: string }).thinking.trim()
+      if (t.length > 0) thinkingParts.push(t)
+    } else if (block.type === 'toolCall') {
+      const tc = block as { type: 'toolCall'; id: string; name: string; arguments: Record<string, unknown> }
+      toolCalls.push({
+        id: tc.id ?? '',
+        name: tc.name ?? '',
+        arguments: tc.arguments ?? {},
+        arguments_text: Object.keys(tc.arguments ?? {}).length > 0 ? JSON.stringify(tc.arguments) : '',
+      })
     }
   }
 
-  /** Flush all pending records. Resolves when the queue is empty. */
-  async flush(): Promise<void> {
-    if (this.queue.length === 0) return
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        if (this.queue.length === 0) resolve()
-        else setImmediate(check)
+  return {
+    text: textParts.length > 0 ? textParts.join('\n\n') : undefined,
+    thinking: thinkingParts.length > 0 ? thinkingParts.join('\n\n') : undefined,
+    toolCalls,
+  }
+}
+
+/**
+ * Extract text output from tool result messages that belong to a given set of
+ * tool call IDs.
+ */
+export function extractToolResults (
+  toolResults: ToolResultMessage[]
+): SpanToolResult[] {
+  return toolResults.map((tr) => {
+    const parts: string[] = []
+    for (const c of tr.content) {
+      if (c.type === 'text') {
+        const t = c.text.trim()
+        if (t.length > 0) parts.push(t)
       }
-      setImmediate(check)
-    })
-  }
-
-  close(): void {
-    if (this.fd !== null) {
-      try { fs.closeSync(this.fd) } catch { /* ignore */ }
-      this.fd = null
     }
-  }
+    return {
+      tool_call_id: tr.toolCallId,
+      tool_name: tr.toolName,
+      output: parts.join('\n'),
+    }
+  })
+}
 
-  getFilePath(): string | null { return this.filePath }
+/**
+ * Build trimmed skill metadata from the systemPromptOptions skills array.
+ * Skills with disableModelInvocation are excluded from the system prompt but
+ * we include them here for observability completeness.
+ */
+function buildSkillMeta (skills: Skill[] | undefined): SkillMeta[] {
+  if (skills == null || skills.length === 0) return []
+  return skills.map((s) => ({
+    name: s.name,
+    path: s.filePath,
+    source: s.source,
+    scope: s.source.includes('~') || s.source.includes(process.env['HOME'] ?? '/home') ? 'user' : 'project',
+  }))
+}
 
-  private scheduleDrain(): void {
-    if (this.draining || this.fd === null) return
-    this.draining = true
-    setImmediate(() => this.drainLoop())
-  }
+/** Build trimmed tool metadata from pi.getAllTools(). */
+function buildToolMeta (tools: ToolInfo[]): ToolMeta[] {
+  return tools.map((t) => ({
+    name: t.name,
+    source: t.sourceInfo.source,
+    scope: t.sourceInfo.scope,
+  }))
+}
 
-  private drainLoop(): void {
-    if (this.fd === null) { this.draining = false; return }
-    const batch = this.queue.splice(0, 100).join('')
-    if (!batch) { this.draining = false; return }
-    try { fs.writeSync(this.fd, batch) } catch { /* ignore write errors */ }
-    if (this.queue.length > 0) setImmediate(() => this.drainLoop())
-    else this.draining = false
+/** Strip undefined values from an object in-place. */
+export function stripUndefined (obj: Record<string, unknown>): void {
+  for (const key of Object.keys(obj)) {
+    if (obj[key] === undefined) delete obj[key]
   }
 }
 
 // ─── Extension ────────────────────────────────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-  const writer = new AsyncJSONLWriter()
+  // ── Session-level state ──────────────────────────────────────────────────
 
-  // ── Session-level state ────────────────────────────────────────────────────
-  const sessionId = crypto.randomUUID()
-  const sessionStartMs = Date.now()
-
-  let currentModel: string | null = null
-  let currentProvider: string | null = null
+  let sessionId: string | undefined
   let sessionFile: string | null = null
+  let sessionStartTs: string | undefined
   let cwd = process.cwd()
+  let currentModel: string | undefined
+  let currentProvider: string | undefined
+  let currentThinkingLevel: string | undefined
+
+  // snapshot of skills + tools captured at before_agent_start, held until
+  // the turn produces a span document to attach them to
+  let currentExchangeId: string | undefined
+  let currentExchangeSkills: SkillMeta[] = []
+  let currentExchangeTools: ToolMeta[] = []
+  let currentExchangeActiveToolNames: string[] = []
+  let currentExchangeCommands: string[] = []
+  let currentUserText: string | undefined
 
   // turn state
-  let currentTurnId: string | null = null
-  let currentTurnIndex = 0
-  let currentTurnStartMs = 0
-  let currentTurnToolCount = 0
+  let currentTurnStartTs: string | undefined
 
-  // per-tool start time keyed by toolCallId
-  const toolStartTimes = new Map<string, number>()
-
-  // session-level totals
-  let totalTurns = 0
-  let totalToolCalls = 0
-  let totalTokensIn = 0
-  let totalTokensOut = 0
-
-  // ── Helpers ────────────────────────────────────────────────────────────────
-
-  function now(): string { return new Date().toISOString() }
-
-  function base(): Omit<BaseRecord, 'type'> {
-    return { '@timestamp': now(), sessionId, sessionFile, cwd }
-  }
-
-  function emit(record: ObsRecord): void { writer.write(record) }
-
-  // ── Session lifecycle ──────────────────────────────────────────────────────
+  // ── Session start ────────────────────────────────────────────────────────
 
   pi.on('session_start', async (_event, ctx) => {
     sessionFile = ctx.sessionManager.getSessionFile() ?? null
     cwd = ctx.cwd
+    sessionStartTs = new Date().toISOString()
 
-    const dir = path.join(os.homedir(), '.pi', 'observability')
-    const dateStr = new Date().toISOString().slice(0, 10)
-    const shortId = sessionId.slice(0, 8)
-    writer.open(path.join(dir, `${dateStr}-${shortId}.jsonl`))
-
-    emit({ type: 'session_start', ...base() })
+    // use the session file's embedded ID when available, otherwise generate one
+    const entries = ctx.sessionManager.getEntries()
+    const sessionEntry = entries.find((e) => e.type === 'session')
+    sessionId = (sessionEntry as Record<string, unknown> | undefined)?.['id'] as string | undefined ??
+      crypto.randomUUID()
   })
 
-  pi.on('session_shutdown', async (_event, ctx) => {
-    // Emit session_end synchronously (tags may arrive after via generateTags)
-    emit({
-      type: 'session_end',
-      ...base(),
-      durationMs: Date.now() - sessionStartMs,
-      totalTurns,
-      totalToolCalls,
-      totalTokensIn,
-      totalTokensOut,
-      model: currentModel,
-      provider: currentProvider,
-    })
+  // ── Thinking level tracking ──────────────────────────────────────────────
 
-    // Fire-and-forget AI tagging; flush waits for everything including tags
-    generateTags(ctx).catch(() => {}).finally(async () => {
-      await writer.flush()
-      writer.close()
-    })
+  type ThinkingLevelEvent = { thinkingLevel?: string }
+  pi.on('thinking_level_select' as Parameters<typeof pi.on>[0], async (event: ThinkingLevelEvent) => {
+    currentThinkingLevel = event.thinkingLevel
   })
 
-  // ── Model tracking ─────────────────────────────────────────────────────────
+  // ── Model tracking ───────────────────────────────────────────────────────
 
-  pi.on('model_select', async (event, _ctx) => {
-    const prev = currentModel
-    const prevProv = currentProvider
+  pi.on('model_select', async (event) => {
     currentModel = event.model.id
     currentProvider = event.model.provider
-
-    emit({
-      type: 'model_change',
-      ...base(),
-      model: currentModel,
-      provider: currentProvider,
-      previousModel: prev,
-      previousProvider: prevProv,
-      source: event.source,
-    })
   })
 
-  // ── Turn tracking ──────────────────────────────────────────────────────────
+  // ── Capture context at the moment a prompt is sent ───────────────────────
 
-  pi.on('turn_start', async (event, ctx) => {
-    currentTurnId = crypto.randomUUID()
-    currentTurnIndex = event.turnIndex
-    currentTurnStartMs = Date.now()
-    currentTurnToolCount = 0
+  pi.on('before_agent_start', async (event, _ctx) => {
+    // fresh exchange ID for every user prompt
+    currentExchangeId = crypto.randomUUID()
+
+    const opts: BuildSystemPromptOptions = event.systemPromptOptions
+    currentExchangeSkills = buildSkillMeta(opts.skills)
+    currentExchangeTools = buildToolMeta(pi.getAllTools())
+    currentExchangeActiveToolNames = pi.getActiveTools()
+    currentExchangeCommands = pi.getCommands().map((c) => c.name)
+
+    // extract plain user text (strip injected <skill> blocks)
+    currentUserText = stripSkillBlocks(event.prompt).trim() || undefined
+  })
+
+  // ── Turn timing ──────────────────────────────────────────────────────────
+
+  pi.on('turn_start', async (_event, ctx) => {
+    currentTurnStartTs = new Date().toISOString()
     cwd = ctx.cwd
-
-    emit({
-      type: 'turn_start',
-      ...base(),
-      turnId: currentTurnId,
-      turnIndex: event.turnIndex,
-      model: currentModel ?? 'unknown',
-      provider: currentProvider ?? 'unknown',
-    })
   })
+
+  // ── Emit one span per completed assistant turn ───────────────────────────
 
   pi.on('turn_end', async (event, _ctx) => {
-    if (!currentTurnId) return
+    const msg = event.message as AssistantMessage | undefined
+    if (msg?.role !== 'assistant') return
 
-    const usage = extractUsage(event)
-    totalTurns++
+    const usage = msg.usage ?? {}
+    const cost = usage.cost ?? {}
+    const model = msg.model ?? currentModel ?? 'unknown'
+    const provider = (msg.provider as string | undefined) ?? currentProvider ?? 'unknown'
+    const timestamp = new Date(msg.timestamp).toISOString()
 
-    emit({
-      type: 'turn_end',
-      ...base(),
-      turnId: currentTurnId,
-      turnIndex: currentTurnIndex,
-      durationMs: Date.now() - currentTurnStartMs,
-      tokensIn: usage?.inputTokens ?? null,
-      tokensOut: usage?.outputTokens ?? null,
-      toolCallCount: currentTurnToolCount,
-    })
+    let durationUs: number | undefined
+    if (currentTurnStartTs != null) {
+      const ms = msg.timestamp - new Date(currentTurnStartTs).getTime()
+      if (!Number.isNaN(ms) && ms >= 0) durationUs = ms * 1000
+    }
 
-    totalTokensIn += usage?.inputTokens ?? 0
-    totalTokensOut += usage?.outputTokens ?? 0
+    const { text, thinking, toolCalls } = extractAssistantText(msg)
+    const toolResults = extractToolResults(event.toolResults)
+
+    const span: Record<string, unknown> = {
+      '@timestamp': timestamp,
+      'span.id': crypto.randomUUID(),
+      'trace.id': sessionId ?? cwd,
+      'span.name': `gen_ai chat ${model}`,
+      ...(durationUs != null ? { 'duration.us': durationUs } : {}),
+
+      'gen_ai.system': inferSystem(provider, model),
+      'gen_ai.operation.name': 'chat',
+      'gen_ai.request.model': model,
+      'gen_ai.response.model': msg.responseModel ?? model,
+      'gen_ai.response.finish_reasons': msg.stopReason ? [msg.stopReason] : [],
+      'gen_ai.usage.input_tokens': usage.input,
+      'gen_ai.usage.output_tokens': usage.output,
+      'gen_ai.usage.cache_read_input_tokens': usage.cacheRead,
+      'gen_ai.usage.cache_creation_input_tokens': usage.cacheWrite,
+      'gen_ai.usage.total_tokens': usage.totalTokens,
+
+      'message.user.text': currentUserText,
+      ...(text != null ? { 'message.assistant.text': text } : {}),
+      ...(thinking != null ? { 'message.assistant.thinking': thinking } : {}),
+      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
+      ...(toolResults.length > 0 ? { tool_results: toolResults } : {}),
+      'turn.tool_call_count': toolCalls.length,
+      'turn.tool_result_count': toolResults.length,
+
+      'pi.session.id': sessionId,
+      'pi.session.cwd': cwd,
+      'pi.session.start': sessionStartTs,
+      'pi.session.file': sessionFile ?? undefined,
+      'pi.session.skills': currentExchangeSkills.length > 0 ? currentExchangeSkills : undefined,
+      'pi.session.skill_names': currentExchangeSkills.length > 0
+        ? currentExchangeSkills.map((s) => s.name)
+        : undefined,
+      'pi.session.tools': currentExchangeTools.length > 0 ? currentExchangeTools : undefined,
+      'pi.session.active_tools': currentExchangeActiveToolNames.length > 0
+        ? currentExchangeActiveToolNames
+        : undefined,
+      'pi.session.commands': currentExchangeCommands.length > 0
+        ? currentExchangeCommands
+        : undefined,
+
+      'pi.turn.exchange_id': currentExchangeId,
+      'pi.model.provider': provider,
+      'pi.model.api': (msg.api as string | undefined),
+      'pi.thinking_level': currentThinkingLevel,
+      'pi.thinking.present': thinking != null,
+      'pi.response_id': msg.responseId,
+
+      'cost.total_usd': cost.total,
+      'cost.input_usd': cost.input,
+      'cost.output_usd': cost.output,
+
+      'service.name': 'pi-coding-agent',
+      'telemetry.sdk.name': 'pi-observability-extension',
+    }
+
+    stripUndefined(span)
+
+    // use pi.response_id as document ID when available (matches ETL idempotency)
+    const docId = (msg.responseId ?? span['span.id']) as string
+
+    emit(span as SpanDocument, docId)
   })
 
-  // ── Tool tracking ──────────────────────────────────────────────────────────
-
-  pi.on('tool_execution_start', async (event, _ctx) => {
-    toolStartTimes.set(event.toolCallId, Date.now())
-  })
-
-  pi.on('tool_execution_end', async (event, _ctx) => {
-    if (!currentTurnId) return
-    const startMs = toolStartTimes.get(event.toolCallId) ?? Date.now()
-    toolStartTimes.delete(event.toolCallId)
-    currentTurnToolCount++
-    totalToolCalls++
-
-    emit({
-      type: 'tool_call',
-      ...base(),
-      turnId: currentTurnId,
-      toolCallId: event.toolCallId,
-      toolName: event.toolName,
-      durationMs: Date.now() - startMs,
-      isError: event.isError ?? false,
-      argsSummary: JSON.stringify(event.args ?? {}).slice(0, 300),
-    })
-  })
-
-  // ── Command tracking ───────────────────────────────────────────────────────
-
-  pi.on('input', async (event, _ctx) => {
-    const text = event.text.trim()
-    if (!text.startsWith('/')) return
-    const spaceIdx = text.indexOf(' ')
-    const command = spaceIdx === -1 ? text.slice(1) : text.slice(1, spaceIdx)
-    const args = spaceIdx === -1 ? '' : text.slice(spaceIdx + 1)
-    emit({ type: 'command', ...base(), command, args })
-  })
-
-  // ── Usage extraction helper ────────────────────────────────────────────────
-
-  function extractUsage(event: unknown): { inputTokens: number; outputTokens: number } | null {
-    try {
-      const msg = (event as { message?: { usage?: { inputTokens?: number; outputTokens?: number } } }).message
-      if (msg?.usage) {
-        return { inputTokens: msg.usage.inputTokens ?? 0, outputTokens: msg.usage.outputTokens ?? 0 }
-      }
-    } catch { /* ignore */ }
-    return null
-  }
-
-  // ── AI tagging ─────────────────────────────────────────────────────────────
+  // ── Output sink (to be wired up separately) ──────────────────────────────
 
   /**
-   * Summarise the session and ask a cheap/fast model to emit single-word tags.
-   * Runs asynchronously; never throws out (errors are swallowed).
+   * Emit a completed span document.
+   * The body of this function is intentionally left as a no-op stub —
+   * the output sink (file, HTTP, Elasticsearch bulk API, etc.) will be
+   * configured separately.
    */
-  async function generateTags(ctx: Parameters<Parameters<ExtensionAPI['on']>[1]>[1]): Promise<void> {
-    const cheapModel = findCheapModel(ctx)
-    if (!cheapModel) return
-
-    const apiKey = await ctx.modelRegistry.getApiKey(cheapModel)
-    if (!apiKey) return
-
-    // Build a concise session summary from the branch entries
-    const entries = ctx.sessionManager.getBranch()
-    const toolNames: string[] = []
-    const userTexts: string[] = []
-
-    for (const entry of entries) {
-      if (entry.type !== 'message') continue
-      const msg = entry.message as Record<string, unknown>
-      if (msg.role === 'toolResult' && typeof msg.toolName === 'string') {
-        toolNames.push(msg.toolName as string)
-      }
-      if (msg.role === 'user' && Array.isArray(msg.content)) {
-        for (const part of msg.content as Array<Record<string, unknown>>) {
-          if (part.type === 'text' && typeof part.text === 'string') {
-            userTexts.push(part.text.slice(0, 200))
-          }
-        }
-      }
-    }
-
-    const uniqueTools = [...new Set(toolNames)].join(', ')
-    const sampleTexts = userTexts.slice(0, 5).join(' | ')
-    const inputSummary = `Tools used: ${uniqueTools || 'none'}. User messages: ${sampleTexts || 'none'}.`
-
-    const tagPrompt = `You are a concise tagger for AI coding-agent sessions.
-
-Given this session summary, output a JSON array of 3-8 single-word lowercase tags categorising:
-- programming language(s) in use (e.g. "typescript", "go", "python", "rust")
-- type of work (e.g. "bugfix", "feature", "refactor", "docs", "testing", "config", "infra")
-- domain (e.g. "pi", "pi-extension", "web", "cli", "database", "devops")
-
-Session summary:
-${inputSummary}
-
-Respond with ONLY a JSON array. Example: ["typescript","feature","pi-extension"]`
-
-    try {
-      const response = await complete(
-        cheapModel,
-        { messages: [{ role: 'user', content: [{ type: 'text', text: tagPrompt }], timestamp: Date.now() }] },
-        { apiKey, maxTokens: 200 }
-      )
-
-      const text = response.content
-        .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
-        .map((c) => c.text)
-        .join('')
-
-      const match = text.match(/\[.*?\]/s)
-      if (!match) return
-
-      const tags = JSON.parse(match[0]) as unknown[]
-      if (!Array.isArray(tags)) return
-
-      emit({
-        type: 'session_tags',
-        ...base(),
-        tags: tags.filter((t): t is string => typeof t === 'string'),
-        summary: inputSummary.slice(0, 500),
-        taggingModel: `${cheapModel.provider}/${cheapModel.id}`,
-      })
-    } catch {
-      // best-effort; never surface to the user
-    }
+  function emit (_span: SpanDocument, _docId: string): void {
+    // sink implementation goes here
   }
+}
 
-  /** Returns the cheapest/fastest model available in the registry. */
-  function findCheapModel(ctx: Parameters<Parameters<ExtensionAPI['on']>[1]>[1]) {
-    const candidates = [
-      { provider: 'google', id: 'gemini-2.0-flash' },
-      { provider: 'google', id: 'gemini-2.5-flash' },
-      { provider: 'google', id: 'gemini-1.5-flash' },
-      { provider: 'anthropic', id: 'claude-haiku-4-5' },
-      { provider: 'anthropic', id: 'claude-3-haiku-20240307' },
-      { provider: 'openai', id: 'gpt-4o-mini' },
-    ]
-    for (const c of candidates) {
-      const m = ctx.modelRegistry.find(c.provider, c.id)
-      if (m) return m
-    }
-    return null
-  }
+// ─── Utility ─────────────────────────────────────────────────────────────────
 
-  // ── /observe command ───────────────────────────────────────────────────────
-
-  pi.registerCommand('observe', {
-    description: 'Show observability file + session stats, or: /observe tags (generate tags now)',
-    handler: async (args, ctx) => {
-      const sub = args?.trim().toLowerCase()
-
-      if (sub === 'tags') {
-        ctx.ui.notify('Generating session tags in background…', 'info')
-        generateTags(ctx).catch(() => {})
-        return
-      }
-
-      const file = writer.getFilePath() ?? '(not yet open)'
-      ctx.ui.notify(
-        [
-          `Observability JSONL: ${file}`,
-          `Session ID: ${sessionId}`,
-          `Turns: ${totalTurns} | Tool calls: ${totalToolCalls}`,
-          `Tokens in: ${totalTokensIn} | out: ${totalTokensOut}`,
-          `Model: ${currentModel ?? 'unknown'} (${currentProvider ?? 'unknown'})`,
-        ].join('\n'),
-        'info'
-      )
-    },
-  })
-
-  // ── observe_analyze tool ───────────────────────────────────────────────────
-
-  pi.registerTool({
-    name: 'observe_analyze',
-    label: 'Observability: Analyze Session',
-    description:
-      'Reads a Pi observability JSONL file and produces a structured per-session analysis ' +
-      'with tool usage frequencies, average durations, token totals, models used, and any ' +
-      'AI-generated tags. Omit jsonl_path to analyse the current session.',
-    promptSnippet: 'Analyse a Pi observability JSONL file and return aggregated session metrics',
-    parameters: Type.Object({
-      jsonl_path: Type.Optional(
-        Type.String({ description: 'Path to the .jsonl file. Defaults to the current session file.' })
-      ),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-      const filePath = params.jsonl_path ?? writer.getFilePath()
-      if (!filePath) {
-        throw new Error('No observability file is open and no path was provided.')
-      }
-
-      let raw: string
-      try {
-        raw = fs.readFileSync(filePath, 'utf8')
-      } catch (e) {
-        throw new Error(`Cannot read ${filePath}: ${(e as Error).message}`)
-      }
-
-      const records = raw
-        .split('\n')
-        .filter(Boolean)
-        .flatMap((line) => {
-          try { return [JSON.parse(line) as ObsRecord] }
-          catch { return [] }
-        })
-
-      // ── aggregate ──────────────────────────────────────────────────────
-      const toolCalls: Record<string, number> = {}
-      const toolErrors: Record<string, number> = {}
-      const toolDurations: Record<string, number[]> = {}
-      const modelsUsed = new Set<string>()
-      const sessions = new Set<string>()
-      const turnDurations: number[] = []
-      let totalIn = 0
-      let totalOut = 0
-      let turnCount = 0
-      let tags: string[] = []
-
-      for (const r of records) {
-        sessions.add(r.sessionId)
-        switch (r.type) {
-          case 'tool_call': {
-            const tc = r as ToolCallRecord
-            toolCalls[tc.toolName] = (toolCalls[tc.toolName] ?? 0) + 1
-            if (tc.isError) toolErrors[tc.toolName] = (toolErrors[tc.toolName] ?? 0) + 1
-            ;(toolDurations[tc.toolName] ??= []).push(tc.durationMs)
-            break
-          }
-          case 'model_change': {
-            const mc = r as ModelChangeRecord
-            modelsUsed.add(`${mc.provider}/${mc.model}`)
-            break
-          }
-          case 'turn_end': {
-            const te = r as TurnEndRecord
-            turnCount++
-            totalIn += te.tokensIn ?? 0
-            totalOut += te.tokensOut ?? 0
-            turnDurations.push(te.durationMs)
-            break
-          }
-          case 'session_tags':
-            tags = (r as SessionTagsRecord).tags
-            break
-        }
-      }
-
-      const avg = (arr: number[]) =>
-        arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0
-
-      const toolStats = Object.entries(toolCalls)
-        .sort(([, a], [, b]) => b - a)
-        .map(([name, calls]) => ({
-          tool: name,
-          calls,
-          errors: toolErrors[name] ?? 0,
-          avgDurationMs: avg(toolDurations[name] ?? []),
-        }))
-
-      const analysis = {
-        filePath,
-        sessions: sessions.size,
-        turns: turnCount,
-        totalTokensIn: totalIn,
-        totalTokensOut: totalOut,
-        avgTurnDurationMs: avg(turnDurations),
-        modelsUsed: [...modelsUsed],
-        tags,
-        toolStats,
-        recordCount: records.length,
-      }
-
-      return {
-        content: [{ type: 'text', text: JSON.stringify(analysis, null, 2) }],
-        details: { analysis },
-      }
-    },
-  })
+/**
+ * Strip injected skill/annotation blocks from a prompt before storing user
+ * text.  Handles both the paired-tag form (`<skill name="...">...</skill>`)
+ * and the self-closing form (`<available_skills/>`).
+ */
+export function stripSkillBlocks (text: string): string {
+  // paired tags: <tag-name ...>...</tag-name>
+  let result = text.replace(/<([\w-]+)[^>]*>[\s\S]*?<\/\1>/g, '')
+  // self-closing annotation tags on their own line
+  result = result.replace(/^[ \t]*<[\w-]+[^>]*\/>\s*$/gm, '')
+  return result
 }

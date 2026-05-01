@@ -1,315 +1,245 @@
 /**
- * Tests for the AsyncJSONLWriter and record aggregation logic used by the
- * observability extension.  We test the writer and aggregation in isolation
- * without needing a live Pi process.
+ * Tests for utilities extracted from the observability extension.
  */
 
 import assert from 'node:assert/strict'
-import { test, describe, beforeEach, afterEach } from 'node:test'
-import * as fs from 'node:fs'
-import * as os from 'node:os'
-import * as path from 'node:path'
-import * as crypto from 'node:crypto'
+import { describe, it } from 'node:test'
 
-// ─── Inline AsyncJSONLWriter (copy to avoid importing the full extension) ─────
+import {
+  extractAssistantText,
+  extractToolResults,
+  inferSystem,
+  stripSkillBlocks,
+  stripUndefined,
+} from './index.ts'
 
-class AsyncJSONLWriter {
-  queue: string[] = []
-  private draining = false
-  private fd: number | null = null
-  private filePath: string | null = null
-
-  open(filePath: string): void {
-    const dir = path.dirname(filePath)
-    fs.mkdirSync(dir, { recursive: true })
-    this.fd = fs.openSync(filePath, 'a')
-    this.filePath = filePath
-  }
-
-  write(record: object): void {
-    try {
-      this.queue.push(JSON.stringify(record) + '\n')
-      if (!this.draining) this.scheduleDrain()
-    } catch { /* ignore */ }
-  }
-
-  async flush(): Promise<void> {
-    if (this.queue.length === 0) return
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        if (this.queue.length === 0) resolve()
-        else setImmediate(check)
-      }
-      setImmediate(check)
-    })
-  }
-
-  close(): void {
-    if (this.fd !== null) {
-      try { fs.closeSync(this.fd) } catch { /* ignore */ }
-      this.fd = null
-    }
-  }
-
-  getFilePath(): string | null { return this.filePath }
-
-  private scheduleDrain(): void {
-    if (this.draining || this.fd === null) return
-    this.draining = true
-    setImmediate(() => this.drainLoop())
-  }
-
-  private drainLoop(): void {
-    if (this.fd === null) { this.draining = false; return }
-    const batch = this.queue.splice(0, 100).join('')
-    if (!batch) { this.draining = false; return }
-    try { fs.writeSync(this.fd, batch) } catch { /* ignore */ }
-    if (this.queue.length > 0) setImmediate(() => this.drainLoop())
-    else this.draining = false
-  }
-}
-
-// ─── Aggregation logic (mirrors extension) ───────────────────────────────────
-
-interface ToolCallRecord { type: 'tool_call'; toolName: string; isError: boolean; durationMs: number; sessionId: string }
-interface TurnEndRecord { type: 'turn_end'; tokensIn: number | null; tokensOut: number | null; durationMs: number; sessionId: string }
-interface ModelChangeRecord { type: 'model_change'; provider: string; model: string; sessionId: string }
-interface SessionTagsRecord { type: 'session_tags'; tags: string[]; sessionId: string }
-type Record_ = ToolCallRecord | TurnEndRecord | ModelChangeRecord | SessionTagsRecord | { type: string; sessionId: string }
-
-function aggregate(records: Record_[]) {
-  const toolCalls: Record<string, number> = {}
-  const toolErrors: Record<string, number> = {}
-  const toolDurations: Record<string, number[]> = {}
-  const modelsUsed = new Set<string>()
-  const sessions = new Set<string>()
-  const turnDurations: number[] = []
-  let totalIn = 0
-  let totalOut = 0
-  let turnCount = 0
-  let tags: string[] = []
-
-  for (const r of records) {
-    sessions.add(r.sessionId)
-    if (r.type === 'tool_call') {
-      const tc = r as ToolCallRecord
-      toolCalls[tc.toolName] = (toolCalls[tc.toolName] ?? 0) + 1
-      if (tc.isError) toolErrors[tc.toolName] = (toolErrors[tc.toolName] ?? 0) + 1
-      ;(toolDurations[tc.toolName] ??= []).push(tc.durationMs)
-    }
-    if (r.type === 'model_change') {
-      const mc = r as ModelChangeRecord
-      modelsUsed.add(`${mc.provider}/${mc.model}`)
-    }
-    if (r.type === 'turn_end') {
-      const te = r as TurnEndRecord
-      turnCount++
-      totalIn += te.tokensIn ?? 0
-      totalOut += te.tokensOut ?? 0
-      turnDurations.push(te.durationMs)
-    }
-    if (r.type === 'session_tags') tags = (r as SessionTagsRecord).tags
-  }
-
-  const avg = (arr: number[]) =>
-    arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0
-
-  return {
-    sessions: sessions.size,
-    turns: turnCount,
-    totalTokensIn: totalIn,
-    totalTokensOut: totalOut,
-    avgTurnDurationMs: avg(turnDurations),
-    modelsUsed: [...modelsUsed],
-    tags,
-    toolStats: Object.entries(toolCalls)
-      .sort(([, a], [, b]) => b - a)
-      .map(([name, calls]) => ({
-        tool: name,
-        calls,
-        errors: toolErrors[name] ?? 0,
-        avgDurationMs: avg(toolDurations[name] ?? []),
-      })),
-  }
-}
-
-// ─── Tests ────────────────────────────────────────────────────────────────────
-
-describe('AsyncJSONLWriter', () => {
-  let tmpFile: string
-
-  beforeEach(() => {
-    tmpFile = path.join(os.tmpdir(), `obs-test-${crypto.randomUUID()}.jsonl`)
+describe('stripSkillBlocks', () => {
+  it('returns plain text unchanged', () => {
+    assert.equal(stripSkillBlocks('hello world'), 'hello world')
   })
 
-  afterEach(() => {
-    try { fs.unlinkSync(tmpFile) } catch { /* ignore */ }
+  it('strips a paired skill block', () => {
+    const input = '<skill name="foo">\nYou must always do this.\n</skill>\ndo the thing'
+    assert.equal(stripSkillBlocks(input).trim(), 'do the thing')
   })
 
-  test('creates the file on open', () => {
-    const w = new AsyncJSONLWriter()
-    w.open(tmpFile)
-    w.close()
-    assert.ok(fs.existsSync(tmpFile), 'file should be created')
+  it('strips a self-closing annotation tag on its own line', () => {
+    const input = '<available_skills/>\nyou should update the README'
+    assert.equal(stripSkillBlocks(input).trim(), 'you should update the README')
   })
 
-  test('writes records as valid JSONL after flush', async () => {
-    const w = new AsyncJSONLWriter()
-    w.open(tmpFile)
-    w.write({ type: 'session_start', '@timestamp': '2025-01-01T00:00:00Z' })
-    w.write({ type: 'turn_start', turnIndex: 0 })
-    await w.flush()
-    w.close()
-
-    const lines = fs.readFileSync(tmpFile, 'utf8').trim().split('\n')
-    assert.equal(lines.length, 2)
-    const first = JSON.parse(lines[0]!) as { type: string }
-    assert.equal(first.type, 'session_start')
+  it('strips multiple annotation blocks', () => {
+    const input = [
+      '<skill name="a">\nmust always\n</skill>',
+      'real instruction',
+      '<skill name="b">\nnever skip\n</skill>',
+    ].join('\n')
+    assert.equal(stripSkillBlocks(input).trim(), 'real instruction')
   })
 
-  test('appends to an existing file', async () => {
-    const w1 = new AsyncJSONLWriter()
-    w1.open(tmpFile)
-    w1.write({ type: 'session_start' })
-    await w1.flush()
-    w1.close()
-
-    const w2 = new AsyncJSONLWriter()
-    w2.open(tmpFile)
-    w2.write({ type: 'turn_start' })
-    await w2.flush()
-    w2.close()
-
-    const lines = fs.readFileSync(tmpFile, 'utf8').trim().split('\n')
-    assert.equal(lines.length, 2)
+  it('strips blocks with kebab-case tag names', () => {
+    const input = '<available-skills>\nmust do this\n</available-skills>\nactual text'
+    assert.equal(stripSkillBlocks(input).trim(), 'actual text')
   })
 
-  test('getFilePath returns the opened path', () => {
-    const w = new AsyncJSONLWriter()
-    assert.equal(w.getFilePath(), null)
-    w.open(tmpFile)
-    assert.equal(w.getFilePath(), tmpFile)
-    w.close()
+  it('strips blocks with underscore tag names', () => {
+    const input = '<context_block>\nmust always\n</context_block>\nactual text'
+    assert.equal(stripSkillBlocks(input).trim(), 'actual text')
   })
 
-  test('writes many records without losing any', async () => {
-    const w = new AsyncJSONLWriter()
-    w.open(tmpFile)
-    const count = 200
-    for (let i = 0; i < count; i++) w.write({ type: 'tool_call', i })
-    await w.flush()
-    w.close()
-    const lines = fs.readFileSync(tmpFile, 'utf8').trim().split('\n')
-    assert.equal(lines.length, count)
+  it('preserves user text when annotation appears first', () => {
+    const input = '<skill name="speckit">\nYou must always use the tool.\n</skill>\nimplement feature X'
+    assert.equal(stripSkillBlocks(input).trim(), 'implement feature X')
   })
 
-  test('flush resolves immediately when queue is empty', async () => {
-    const w = new AsyncJSONLWriter()
-    w.open(tmpFile)
-    await assert.doesNotReject(w.flush())
-    w.close()
+  it('does not strip inline self-closing tags within prose', () => {
+    const input = '<skill name="foo">\nskip this\n</skill>\nuse <MyComponent /> in the JSX'
+    const result = stripSkillBlocks(input)
+    assert.ok(result.includes('<MyComponent />'), 'inline JSX tag should be preserved')
+  })
+
+  it('returns empty string when entire content is one skill block', () => {
+    const input = '<skill name="x">\nsome instructions\n</skill>'
+    assert.equal(stripSkillBlocks(input).trim(), '')
+  })
+
+  it('strips blocks with attributes on the opening tag', () => {
+    const input = '<skill name="foo" location="/path/to/SKILL.md">\ncontent\n</skill>\nuser text'
+    assert.equal(stripSkillBlocks(input).trim(), 'user text')
   })
 })
 
-describe('aggregate', () => {
-  const sid = 'session-1'
-
-  test('counts tool calls and errors', () => {
-    const records: Record_[] = [
-      { type: 'tool_call', toolName: 'bash', isError: false, durationMs: 100, sessionId: sid },
-      { type: 'tool_call', toolName: 'bash', isError: true,  durationMs: 50,  sessionId: sid },
-      { type: 'tool_call', toolName: 'read', isError: false, durationMs: 10,  sessionId: sid },
-    ]
-    const result = aggregate(records)
-    const bash = result.toolStats.find((t) => t.tool === 'bash')!
-    assert.equal(bash.calls, 2)
-    assert.equal(bash.errors, 1)
-    const read = result.toolStats.find((t) => t.tool === 'read')!
-    assert.equal(read.calls, 1)
-    assert.equal(read.errors, 0)
+describe('inferSystem', () => {
+  it('maps known providers directly', () => {
+    assert.equal(inferSystem('anthropic', 'claude-sonnet'), 'anthropic')
+    assert.equal(inferSystem('openai', 'gpt-4'), 'openai')
+    assert.equal(inferSystem('google', 'gemini-pro'), 'google_ai_studio')
   })
 
-  test('sorts toolStats by call count descending', () => {
-    const records: Record_[] = [
-      { type: 'tool_call', toolName: 'read', isError: false, durationMs: 10, sessionId: sid },
-      { type: 'tool_call', toolName: 'bash', isError: false, durationMs: 10, sessionId: sid },
-      { type: 'tool_call', toolName: 'bash', isError: false, durationMs: 10, sessionId: sid },
-    ]
-    const result = aggregate(records)
-    assert.equal(result.toolStats[0]!.tool, 'bash')
-    assert.equal(result.toolStats[1]!.tool, 'read')
+  it('maps github-copilot to openai for gpt/o-series models', () => {
+    assert.equal(inferSystem('github-copilot', 'gpt-4'), 'openai')
+    assert.equal(inferSystem('github-copilot', 'o1-mini'), 'openai')
+    assert.equal(inferSystem('github-copilot', 'o3-preview'), 'openai')
   })
 
-  test('calculates average tool duration', () => {
-    const records: Record_[] = [
-      { type: 'tool_call', toolName: 'bash', isError: false, durationMs: 100, sessionId: sid },
-      { type: 'tool_call', toolName: 'bash', isError: false, durationMs: 200, sessionId: sid },
-    ]
-    const result = aggregate(records)
-    assert.equal(result.toolStats[0]!.avgDurationMs, 150)
+  it('maps github-copilot to anthropic for claude models', () => {
+    assert.equal(inferSystem('github-copilot', 'claude-sonnet-4'), 'anthropic')
   })
 
-  test('sums token counts from turn_end records', () => {
-    const records: Record_[] = [
-      { type: 'turn_end', tokensIn: 100, tokensOut: 50,  durationMs: 1000, sessionId: sid },
-      { type: 'turn_end', tokensIn: 200, tokensOut: 100, durationMs: 2000, sessionId: sid },
-    ]
-    const result = aggregate(records)
-    assert.equal(result.totalTokensIn, 300)
-    assert.equal(result.totalTokensOut, 150)
-    assert.equal(result.turns, 2)
+  it('falls back to model name when provider is unrecognized', () => {
+    assert.equal(inferSystem('unknown', 'claude-xyz'), 'anthropic')
+    assert.equal(inferSystem('unknown', 'gpt-xyz'), 'openai')
+    assert.equal(inferSystem('unknown', 'gemini-xyz'), 'google_ai_studio')
   })
 
-  test('handles null token values', () => {
-    const records: Record_[] = [
-      { type: 'turn_end', tokensIn: null, tokensOut: null, durationMs: 500, sessionId: sid },
-    ]
-    const result = aggregate(records)
-    assert.equal(result.totalTokensIn, 0)
-    assert.equal(result.totalTokensOut, 0)
+  it('returns provider name for unrecognized combinations', () => {
+    assert.equal(inferSystem('custom', 'custom-model'), 'custom')
   })
 
-  test('calculates average turn duration', () => {
-    const records: Record_[] = [
-      { type: 'turn_end', tokensIn: 0, tokensOut: 0, durationMs: 1000, sessionId: sid },
-      { type: 'turn_end', tokensIn: 0, tokensOut: 0, durationMs: 3000, sessionId: sid },
-    ]
-    const result = aggregate(records)
-    assert.equal(result.avgTurnDurationMs, 2000)
+  it('returns unknown when nothing matches', () => {
+    assert.equal(inferSystem('', ''), 'unknown')
+  })
+})
+
+describe('stripUndefined', () => {
+  it('removes undefined keys while preserving null and other values', () => {
+    const obj: Record<string, unknown> = { a: 1, b: undefined, c: null, d: 'str', e: false }
+    stripUndefined(obj)
+    assert.deepEqual(Object.keys(obj).sort(), ['a', 'c', 'd', 'e'])
+    assert.equal(obj.a, 1)
+    assert.equal(obj.c, null)
+    assert.equal(obj.d, 'str')
+    assert.equal(obj.e, false)
   })
 
-  test('collects unique models used', () => {
-    const records: Record_[] = [
-      { type: 'model_change', provider: 'anthropic', model: 'claude-sonnet-4-5', sessionId: sid },
-      { type: 'model_change', provider: 'google',    model: 'gemini-2.5-pro',    sessionId: sid },
-      { type: 'model_change', provider: 'anthropic', model: 'claude-sonnet-4-5', sessionId: sid },
-    ]
-    const result = aggregate(records)
-    assert.equal(result.modelsUsed.length, 2)
-    assert.ok(result.modelsUsed.includes('anthropic/claude-sonnet-4-5'))
-    assert.ok(result.modelsUsed.includes('google/gemini-2.5-pro'))
+  it('handles an empty object', () => {
+    const obj: Record<string, unknown> = {}
+    stripUndefined(obj)
+    assert.deepEqual(obj, {})
   })
 
-  test('captures session_tags', () => {
-    const records: Record_[] = [
-      { type: 'session_tags', tags: ['typescript', 'feature', 'pi-extension'], sessionId: sid },
-    ]
-    const result = aggregate(records)
-    assert.deepEqual(result.tags, ['typescript', 'feature', 'pi-extension'])
+  it('handles an object with only undefined values', () => {
+    const obj: Record<string, unknown> = { a: undefined, b: undefined }
+    stripUndefined(obj)
+    assert.deepEqual(obj, {})
+  })
+})
+
+describe('extractAssistantText', () => {
+  it('extracts plain text blocks', () => {
+    const msg = {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'hello world' }],
+    } as unknown as Parameters<typeof extractAssistantText>[0]
+    const result = extractAssistantText(msg)
+    assert.equal(result.text, 'hello world')
+    assert.equal(result.thinking, undefined)
+    assert.deepEqual(result.toolCalls, [])
   })
 
-  test('counts unique sessions', () => {
-    const records: Record_[] = [
-      { type: 'session_start', sessionId: 'a' } as Record_,
-      { type: 'session_start', sessionId: 'b' } as Record_,
-      { type: 'turn_end', tokensIn: 0, tokensOut: 0, durationMs: 100, sessionId: 'a' },
-    ]
-    const result = aggregate(records)
-    assert.equal(result.sessions, 2)
+  it('joins multiple text blocks with double newline', () => {
+    const msg = {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'first' },
+        { type: 'text', text: 'second' },
+      ],
+    } as unknown as Parameters<typeof extractAssistantText>[0]
+    const result = extractAssistantText(msg)
+    assert.equal(result.text, 'first\n\nsecond')
   })
 
-  test('returns zero avgTurnDurationMs when no turns', () => {
-    const result = aggregate([])
-    assert.equal(result.avgTurnDurationMs, 0)
+  it('extracts thinking blocks', () => {
+    const msg = {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'let me think...' },
+        { type: 'text', text: 'done' },
+      ],
+    } as unknown as Parameters<typeof extractAssistantText>[0]
+    const result = extractAssistantText(msg)
+    assert.equal(result.thinking, 'let me think...')
+    assert.equal(result.text, 'done')
+  })
+
+  it('extracts tool calls', () => {
+    const msg = {
+      role: 'assistant',
+      content: [
+        {
+          type: 'toolCall',
+          id: 'tc-1',
+          name: 'read_file',
+          arguments: { path: 'index.ts' },
+        },
+      ],
+    } as unknown as Parameters<typeof extractAssistantText>[0]
+    const result = extractAssistantText(msg)
+    assert.equal(result.toolCalls.length, 1)
+    assert.equal(result.toolCalls[0].id, 'tc-1')
+    assert.equal(result.toolCalls[0].name, 'read_file')
+    assert.deepEqual(result.toolCalls[0].arguments, { path: 'index.ts' })
+    assert.equal(result.toolCalls[0].arguments_text, '{"path":"index.ts"}')
+  })
+
+  it('skips empty text and thinking blocks', () => {
+    const msg = {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: '  ' },
+        { type: 'thinking', thinking: '' },
+        { type: 'text', text: 'real' },
+      ],
+    } as unknown as Parameters<typeof extractAssistantText>[0]
+    const result = extractAssistantText(msg)
+    assert.equal(result.text, 'real')
+    assert.equal(result.thinking, undefined)
+  })
+})
+
+describe('extractToolResults', () => {
+  it('extracts text from tool results', () => {
+    const results = [
+      {
+        role: 'toolResult',
+        toolCallId: 'tc-1',
+        toolName: 'read',
+        content: [{ type: 'text', text: 'file contents' }],
+      },
+    ] as unknown as Parameters<typeof extractToolResults>[0]
+    const extracted = extractToolResults(results)
+    assert.equal(extracted.length, 1)
+    assert.equal(extracted[0].tool_call_id, 'tc-1')
+    assert.equal(extracted[0].tool_name, 'read')
+    assert.equal(extracted[0].output, 'file contents')
+  })
+
+  it('joins multiple text parts with newline', () => {
+    const results = [
+      {
+        role: 'toolResult',
+        toolCallId: 'tc-1',
+        toolName: 'read',
+        content: [
+          { type: 'text', text: 'line 1' },
+          { type: 'text', text: 'line 2' },
+        ],
+      },
+    ] as unknown as Parameters<typeof extractToolResults>[0]
+    const extracted = extractToolResults(results)
+    assert.equal(extracted[0].output, 'line 1\nline 2')
+  })
+
+  it('returns empty output when no text content', () => {
+    const results = [
+      {
+        role: 'toolResult',
+        toolCallId: 'tc-1',
+        toolName: 'read',
+        content: [],
+      },
+    ] as unknown as Parameters<typeof extractToolResults>[0]
+    const extracted = extractToolResults(results)
+    assert.equal(extracted[0].output, '')
   })
 })
