@@ -16,6 +16,7 @@ jobs:
       tokenshrink-release-created: ${{ steps.release.outputs['packages/tokenshrink--release_created'] }}
       spec-kit-release-created: ${{ steps.release.outputs['packages/spec-kit--release_created'] }}
       vmpi-release-created: ${{ steps.release.outputs['packages/vmpi--release_created'] }}
+      observability-release-created: ${{ steps.release.outputs['packages/observability--release_created'] }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -119,3 +120,27 @@ jobs:
 
       - name: Publish
         run: npm publish --workspace packages/vmpi
+
+  publish-observability:
+    needs: release-please
+    if: ${{ needs.release-please.outputs['observability-release-created'] == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm test --workspace packages/observability
+
+      - name: Publish
+        run: npm publish --workspace packages/observability

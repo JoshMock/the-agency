@@ -13,6 +13,9 @@
     },
     "packages/vmpi": {
       "component": "vmpi"
+    },
+    "packages/observability": {
+      "component": "pi-observability"
     }
   }
 }

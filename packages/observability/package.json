@@ -1,14 +1,13 @@
 {
   "name": "@the-agency/pi-observability",
   "version": "0.1.0",
-  "description": "Observability extension for Pi: tracks tool usage, tokens, models, skills, and sessions as JSONL timeseries data ready for Elasticsearch.",
+  "description": "Record tool usage, tokens, models, skills, and sessions as JSONL timeseries data in OpenTelemetry format.",
   "type": "module",
   "main": "index.ts",
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
-    "test": "node --experimental-transform-types --test index.test.ts",
-    "etl": "node --experimental-transform-types pi-sessions-to-otel.ts"
+    "test": "node --experimental-transform-types --test index.test.ts"
   },
   "pi": {
     "extensions": [
@@ -18,6 +17,7 @@
   "files": [
     "*.ts",
     "!*.test.ts",
+    "!pi-sessions-to-otel.ts",
     "README.md",
     "LICENSE"
   ],
