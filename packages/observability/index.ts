@@ -186,7 +186,7 @@ function buildSkillMeta (skills: Skill[] | undefined): SkillMeta[] {
     name: s.name,
     path: s.filePath,
     source: s.source,
-    scope: s.source.includes('~') || s.source.includes(process.env['HOME'] ?? '/home') ? 'user' : 'project',
+    scope: s.source != null && (s.source.includes('~') || s.source.includes(process.env['HOME'] ?? '/home')) ? 'user' : 'project',
   }))
 }
 
