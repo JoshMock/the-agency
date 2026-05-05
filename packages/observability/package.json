@@ -34,6 +34,11 @@
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   },
+  "dependencies": {
+    "@opentelemetry/api-logs": "^0.57.0",
+    "@opentelemetry/exporter-logs-otlp-http": "^0.57.0",
+    "@opentelemetry/sdk-logs": "^0.57.0"
+  },
   "devDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   },

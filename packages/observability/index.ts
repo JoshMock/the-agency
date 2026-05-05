@@ -31,9 +31,19 @@ import type {
   Skill,
   ToolInfo,
 } from '@mariozechner/pi-coding-agent'
+import { SeverityNumber } from '@opentelemetry/api-logs'
+import type { ExportResult } from '@opentelemetry/core'
+import { OTLPLogExporter } from '@opentelemetry/exporter-logs-otlp-http'
+import {
+  BatchLogRecordProcessor,
+  LoggerProvider,
+  type Logger,
+  type LogRecordExporter,
+  type ReadableLogRecord,
+} from '@opentelemetry/sdk-logs'
 import * as crypto from 'node:crypto'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { FileJsonlExporter } from './file-exporter.ts'
 
 /** Extracted tool call for the span document. */
 interface SpanToolCall {
@@ -85,7 +95,20 @@ interface SpanDocument {
   'span.name': string
 }
 
-// ─── Provider → gen_ai.system mapping ────────────────────────────────────────
+/** Summary of configured observability exporters. */
+interface ExporterStatus {
+  fileEnabled: boolean
+  otlpEnabled: boolean
+}
+
+/** Health state of a single export sink. */
+type SinkHealth = 'pending' | 'ok' | 'error'
+
+/** Minimal UI reference needed to update the status pill. */
+interface UiRef {
+  setStatus(key: string, value: string | undefined): void
+  theme: { fg(color: string, text: string): string }
+}
 
 const PROVIDER_TO_SYSTEM: Record<string, string> = {
   anthropic: 'anthropic',
@@ -99,6 +122,8 @@ const PROVIDER_TO_SYSTEM: Record<string, string> = {
   ollama: 'ollama',
   cursor: 'openai',
 }
+
+const OTEL_STATUS_KEY = 'otel'
 
 /** Map a pi provider + model hint to an OTel gen_ai.system value. */
 export function inferSystem (provider: string, model: string): string {
@@ -115,8 +140,6 @@ export function inferSystem (provider: string, model: string): string {
   if (m.includes('gemini')) return 'google_ai_studio'
   return provider || 'unknown'
 }
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /**
  * Extract text blocks from an assistant message, returning the joined text
@@ -206,11 +229,81 @@ export function stripUndefined (obj: Record<string, unknown>): void {
   }
 }
 
-// ─── Extension ────────────────────────────────────────────────────────────────
+/** Build the per-session JSONL observability file path. */
+function observabilityFilePath (sessionId: string): string {
+  const date = new Date().toISOString().slice(0, 10)
+  const home = process.env['HOME'] ?? process.env['USERPROFILE'] ?? '/tmp'
+  return `${home}/.pi/observability/${date}-${sessionId.slice(0, 8)}.jsonl`
+}
+
+/** Build a themed status pill string using per-sink health colors. */
+function buildStatusLabel (ui: UiRef, fileHealth: SinkHealth, otlpHealth: SinkHealth, status: ExporterStatus): string {
+  const color = (h: SinkHealth): string => h === 'ok' ? 'success' : h === 'error' ? 'error' : 'dim'
+  const parts: string[] = []
+  if (status.fileEnabled) parts.push(ui.theme.fg(color(fileHealth), 'file'))
+  if (status.otlpEnabled) parts.push(ui.theme.fg(color(otlpHealth), 'otlp'))
+  if (parts.length === 0) return ui.theme.fg('dim', 'off')
+  return `otel: ${parts.join(ui.theme.fg('dim', '+'))}`
+}
+
+/**
+ * Wraps a LogRecordExporter to invoke a callback after each export attempt.
+ * Used to surface success/failure to the UI status pill.
+ */
+class TrackingExporter implements LogRecordExporter {
+  constructor(
+    private inner: LogRecordExporter,
+    private onResult: (success: boolean) => void
+  ) {}
+
+  export(records: ReadableLogRecord[], resultCallback: (result: ExportResult) => void): void {
+    this.inner.export(records, (result) => {
+      if (records.length > 0) this.onResult(result.code === 0)
+      resultCallback(result)
+    })
+  }
+
+  shutdown(): Promise<void> {
+    return this.inner.shutdown()
+  }
+}
+
+/** Return value of buildLoggerProvider. */
+interface LoggerProviderBuild {
+  provider: LoggerProvider
+  logger: Logger
+  status: ExporterStatus
+}
+
+/** Build the OTel logger provider and return logger + exporter status. */
+export function buildLoggerProvider (
+  filePath: string,
+  onResult?: (sink: 'file' | 'otlp', success: boolean) => void
+): LoggerProviderBuild {
+  const processors = [
+    new BatchLogRecordProcessor(new TrackingExporter(new FileJsonlExporter(filePath), (ok) => onResult?.('file', ok))),
+  ]
+
+  const otlpEnabled = process.env['OTEL_EXPORTER_OTLP_LOGS_ENDPOINT'] != null
+  if (otlpEnabled) {
+    processors.push(new BatchLogRecordProcessor(new TrackingExporter(new OTLPLogExporter(), (ok) => onResult?.('otlp', ok))))
+  }
+
+  const provider = new LoggerProvider()
+  for (const processor of processors) {
+    provider.addLogRecordProcessor(processor)
+  }
+  return {
+    provider,
+    logger: provider.getLogger('pi-observability'),
+    status: {
+      fileEnabled: true,
+      otlpEnabled,
+    },
+  }
+}
 
 export default function (pi: ExtensionAPI) {
-  // ── Session-level state ──────────────────────────────────────────────────
-
   let sessionId: string | undefined
   let sessionFile: string | null = null
   let sessionStartTs: string | undefined
@@ -218,9 +311,13 @@ export default function (pi: ExtensionAPI) {
   let currentModel: string | undefined
   let currentProvider: string | undefined
   let currentThinkingLevel: string | undefined
+  let otelProvider: LoggerProvider | undefined
+  let otelLogger: Logger | undefined
+  let exporterStatus: ExporterStatus = { fileEnabled: false, otlpEnabled: false }
+  let uiRef: UiRef | undefined
+  let fileHealth: SinkHealth = 'pending'
+  let otlpHealth: SinkHealth = 'pending'
 
-  // snapshot of skills + tools captured at before_agent_start, held until
-  // the turn produces a span document to attach them to
   let currentExchangeId: string | undefined
   let currentExchangeSkills: SkillMeta[] = []
   let currentExchangeTools: ToolMeta[] = []
@@ -228,41 +325,47 @@ export default function (pi: ExtensionAPI) {
   let currentExchangeCommands: string[] = []
   let currentUserText: string | undefined
 
-  // turn state
   let currentTurnStartTs: string | undefined
-
-  // ── Session start ────────────────────────────────────────────────────────
 
   pi.on('session_start', async (_event, ctx) => {
     sessionFile = ctx.sessionManager.getSessionFile() ?? null
     cwd = ctx.cwd
     sessionStartTs = new Date().toISOString()
 
-    // use the session file's embedded ID when available, otherwise generate one
     const entries = ctx.sessionManager.getEntries()
     const sessionEntry = entries.find((e) => e.type === 'session')
     sessionId = (sessionEntry as Record<string, unknown> | undefined)?.['id'] as string | undefined ??
       crypto.randomUUID()
-  })
 
-  // ── Thinking level tracking ──────────────────────────────────────────────
+    const filePath = observabilityFilePath(sessionId)
+    const built = buildLoggerProvider(filePath, (sink, success) => {
+      if (sink === 'file') fileHealth = success ? 'ok' : 'error'
+      else otlpHealth = success ? 'ok' : 'error'
+      if (uiRef != null) {
+        uiRef.setStatus(OTEL_STATUS_KEY, buildStatusLabel(uiRef, fileHealth, otlpHealth, exporterStatus))
+      }
+    })
+    otelProvider = built.provider
+    otelLogger = built.logger
+    exporterStatus = built.status
+
+    if (ctx.hasUI) {
+      uiRef = ctx.ui
+      ctx.ui.setStatus(OTEL_STATUS_KEY, buildStatusLabel(ctx.ui, fileHealth, otlpHealth, exporterStatus))
+    }
+  })
 
   type ThinkingLevelEvent = { thinkingLevel?: string }
   pi.on('thinking_level_select' as Parameters<typeof pi.on>[0], async (event: ThinkingLevelEvent) => {
     currentThinkingLevel = event.thinkingLevel
   })
 
-  // ── Model tracking ───────────────────────────────────────────────────────
-
   pi.on('model_select', async (event) => {
     currentModel = event.model.id
     currentProvider = event.model.provider
   })
 
-  // ── Capture context at the moment a prompt is sent ───────────────────────
-
   pi.on('before_agent_start', async (event, _ctx) => {
-    // fresh exchange ID for every user prompt
     currentExchangeId = crypto.randomUUID()
 
     const opts: BuildSystemPromptOptions = event.systemPromptOptions
@@ -271,18 +374,13 @@ export default function (pi: ExtensionAPI) {
     currentExchangeActiveToolNames = pi.getActiveTools()
     currentExchangeCommands = pi.getCommands().map((c) => c.name)
 
-    // extract plain user text (strip injected <skill> blocks)
-    currentUserText = stripSkillBlocks(event.prompt).trim() || undefined
+    currentUserText = stripSkillBlocks(event.prompt).trim() ?? undefined
   })
-
-  // ── Turn timing ──────────────────────────────────────────────────────────
 
   pi.on('turn_start', async (_event, ctx) => {
     currentTurnStartTs = new Date().toISOString()
     cwd = ctx.cwd
   })
-
-  // ── Emit one span per completed assistant turn ───────────────────────────
 
   pi.on('turn_end', async (event, _ctx) => {
     const msg = event.message as AssistantMessage | undefined
@@ -362,36 +460,46 @@ export default function (pi: ExtensionAPI) {
 
     stripUndefined(span)
 
-    // use pi.response_id as document ID when available (matches ETL idempotency)
     const docId = (msg.responseId ?? span['span.id']) as string
 
     emit(span as SpanDocument, docId)
   })
 
-  // ── Output sink (to be wired up separately) ──────────────────────────────
+  pi.on('session_shutdown' as Parameters<typeof pi.on>[0], async (_event, ctx) => {
+    if (otelProvider == null) return
 
-  /**
-   * Emit a completed span document.
-   * The body of this function is intentionally left as a no-op stub —
-   * the output sink (file, HTTP, Elasticsearch bulk API, etc.) will be
-   * configured separately.
-   */
-  function emit (_span: SpanDocument, _docId: string): void {
-    // sink implementation goes here
+    if (ctx.hasUI) ctx.ui.notify('OTel: flushing logs...', 'info')
+
+    try {
+      await otelProvider.shutdown()
+      if (ctx.hasUI) ctx.ui.notify('OTel: flush complete', 'info')
+    } catch (error) {
+      if (ctx.hasUI) {
+        const message = error instanceof Error ? error.message : String(error)
+        ctx.ui.notify(`OTel: flush failed: ${message}`, 'error')
+      }
+    }
+  })
+
+  /** Emit a completed span document through the OTel logger provider. */
+  function emit (span: SpanDocument, _docId: string): void {
+    if (otelLogger == null) return
+    otelLogger.emit({
+      severityNumber: SeverityNumber.INFO,
+      severityText: 'INFO',
+      body: String(span['span.name'] ?? 'gen_ai chat'),
+      attributes: span as Record<string, unknown>,
+    })
   }
 }
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
-
 /**
  * Strip injected skill/annotation blocks from a prompt before storing user
- * text.  Handles both the paired-tag form (`<skill name="...">...</skill>`)
- * and the self-closing form (`<available_skills/>`).
+ * text. Handles both paired tags (`<skill ...>...</skill>`) and self-closing
+ * tags (`<available_skills/>`) on standalone lines.
  */
 export function stripSkillBlocks (text: string): string {
-  // paired tags: <tag-name ...>...</tag-name>
   let result = text.replace(/<([\w-]+)[^>]*>[\s\S]*?<\/\1>/g, '')
-  // self-closing annotation tags on their own line
   result = result.replace(/^[ \t]*<[\w-]+[^>]*\/>\s*$/gm, '')
   return result
 }

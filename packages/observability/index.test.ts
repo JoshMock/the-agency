@@ -4,14 +4,25 @@
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { FileJsonlExporter } from './file-exporter.ts'
 
 import {
+  buildLoggerProvider,
   extractAssistantText,
   extractToolResults,
   inferSystem,
   stripSkillBlocks,
   stripUndefined,
 } from './index.ts'
+
+/** Returns a unique temp file path for a test. */
+function tempPath (prefix = 'obs-test'): string {
+  return join(tmpdir(), `${prefix}-${Math.random().toString(36).slice(2)}.jsonl`)
+}
 
 describe('stripSkillBlocks', () => {
   it('returns plain text unchanged', () => {
@@ -241,5 +252,93 @@ describe('extractToolResults', () => {
     ] as unknown as Parameters<typeof extractToolResults>[0]
     const extracted = extractToolResults(results)
     assert.equal(extracted[0].output, '')
+  })
+})
+
+describe('FileJsonlExporter', () => {
+  it('writes attributes as JSONL and calls resultCallback with code 0', () => {
+    const path = tempPath('file-exporter-test')
+    try {
+      const exporter = new FileJsonlExporter(path)
+      const records = [
+        { attributes: { 'span.name': 'turn_1', model: 'claude' } },
+        { attributes: { 'span.name': 'turn_2', model: 'gpt-4' } },
+      ] as any[]
+      let callbackResult: { code: number; error?: Error } | undefined
+      exporter.export(records, (r) => { callbackResult = r })
+      assert.equal(callbackResult?.code, 0)
+      const lines = readFileSync(path, 'utf8').trim().split('\n')
+      assert.equal(lines.length, 2)
+      assert.deepEqual(JSON.parse(lines[0]), { 'span.name': 'turn_1', model: 'claude' })
+      assert.deepEqual(JSON.parse(lines[1]), { 'span.name': 'turn_2', model: 'gpt-4' })
+    } finally {
+      if (existsSync(path)) unlinkSync(path)
+    }
+  })
+
+  it('creates the parent directory if it does not exist', () => {
+    const dir = join(tmpdir(), `obs-test-${Math.random().toString(36).slice(2)}`)
+    const path = join(dir, 'out.jsonl')
+    try {
+      const exporter = new FileJsonlExporter(path)
+      exporter.export([{ attributes: { a: 1 } }] as any[], () => {})
+      assert.ok(existsSync(path))
+    } finally {
+      if (existsSync(path)) unlinkSync(path)
+    }
+  })
+
+  it('calls resultCallback with code 1 on a write failure', () => {
+    const dir = join(tmpdir(), `obs-ro-${Math.random().toString(36).slice(2)}`)
+    mkdirSync(dir, { recursive: true })
+    chmodSync(dir, 0o444)
+    const path = join(dir, 'out.jsonl')
+    const exporter = new FileJsonlExporter(path)
+    let callbackResult: { code: number; error?: Error } | undefined
+    exporter.export([{ attributes: { x: 1 } }] as any[], (r) => { callbackResult = r })
+    assert.equal(callbackResult?.code, 1)
+    assert.ok(callbackResult?.error instanceof Error)
+  })
+
+  it('shutdown resolves without error', async () => {
+    const path = tempPath('file-exporter-test')
+    const exporter = new FileJsonlExporter(path)
+    await assert.doesNotReject(() => exporter.shutdown())
+  })
+})
+
+describe('buildLoggerProvider', () => {
+  it('writes a log record to the file after shutdown', async () => {
+    const path = tempPath('obs-provider-test')
+    try {
+      const { provider, logger } = buildLoggerProvider(path)
+      logger.emit({ body: 'test', attributes: { 'span.name': 'gen_ai chat claude', foo: 'bar' } })
+      await provider.shutdown()
+      assert.ok(existsSync(path), 'output file should exist')
+      const lines = readFileSync(path, 'utf8').trim().split('\n').filter(Boolean)
+      assert.equal(lines.length, 1)
+      const doc = JSON.parse(lines[0])
+      assert.equal(doc['span.name'], 'gen_ai chat claude')
+      assert.equal(doc.foo, 'bar')
+    } finally {
+      if (existsSync(path)) unlinkSync(path)
+    }
+  })
+
+  it('calls onResult with file sink and true after a successful export', async () => {
+    const path = tempPath('obs-provider-test')
+    const results: Array<{ sink: string; success: boolean }> = []
+    try {
+      const { provider, logger } = buildLoggerProvider(path, (sink, success) => {
+        results.push({ sink, success })
+      })
+      logger.emit({ body: 'test', attributes: { x: 1 } })
+      await provider.shutdown()
+      assert.ok(results.length >= 1)
+      assert.equal(results[0].sink, 'file')
+      assert.equal(results[0].success, true)
+    } finally {
+      if (existsSync(path)) unlinkSync(path)
+    }
   })
 })
