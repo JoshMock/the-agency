@@ -142,14 +142,15 @@ Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_
 
 ### Built-in providers
 
-| Provider | Allowed domains | Source |
-|---|---|---|
-| `github-copilot` | `*.githubcopilot.com`, `api.github.com`, `copilot-proxy.githubusercontent.com` | [docs.github.com/en/copilot/reference/copilot-allowlist-reference](https://docs.github.com/en/copilot/reference/copilot-allowlist-reference) |
-| `gemini` | `generativelanguage.googleapis.com`, `oauth2.googleapis.com`, `www.googleapis.com` | [ai.google.dev/gemini-api/docs/quickstart](https://ai.google.dev/gemini-api/docs/quickstart) |
-| `openai` | `api.openai.com` | [platform.openai.com/docs/api-reference](https://platform.openai.com/docs/api-reference/introduction) |
-| `anthropic` | `api.anthropic.com` | [docs.anthropic.com/en/api/getting-started](https://docs.anthropic.com/en/api/getting-started) |
-| `ollama` | `localhost`, `127.0.0.1` | (local service, no external network) |
-| `github` | `github.com`, `*.github.com`, `*.githubusercontent.com` | [about-githubs-ip-addresses](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses) |
+| Provider | Allowed domains |
+|---|---|
+| `github-copilot` | `*.githubcopilot.com`, `api.github.com`, `copilot-proxy.githubusercontent.com` |
+| `gemini` | `generativelanguage.googleapis.com`, `oauth2.googleapis.com`, `www.googleapis.com` |
+| `openai` | `api.openai.com` |
+| `anthropic` | `api.anthropic.com` |
+| `github` | `github.com`, `*.github.com`, `*.githubusercontent.com` |
+| `openrouter` | `api.openrouter.ai` |
+| `ollama`, `llama.cpp` | `localhost`, `127.0.0.1` |
 
 Multiple providers can be combined. Their domains are merged with any `allowedDomains`.
 

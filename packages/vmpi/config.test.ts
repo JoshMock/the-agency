@@ -102,7 +102,7 @@ describe('resolvePolicy', () => {
 })
 
 describe('PROVIDER_DOMAINS', () => {
-  const knownProviders = ['github-copilot', 'gemini', 'openai', 'anthropic', 'ollama', 'github', 'openrouter']
+  const knownProviders = ['github-copilot', 'gemini', 'openai', 'anthropic', 'ollama', 'github', 'openrouter', 'llama.cpp']
 
   it('contains all expected providers', () => {
     for (const p of knownProviders) {

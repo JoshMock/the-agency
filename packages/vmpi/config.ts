@@ -11,30 +11,19 @@ const { cosmiconfigSync } = require('cosmiconfig') as typeof import('cosmiconfig
  */
 export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
   'github-copilot': [
-    // API calls: Copilot tokens embed a proxy-ep field that maps to
-    // api.{sku}.githubcopilot.com. A wildcard covers all plan tiers
-    // (individual, business, enterprise) without hard-coding each one.
-    // Source: https://docs.github.com/en/copilot/reference/copilot-allowlist-reference
     '*.githubcopilot.com',
-    // OAuth token refresh hits api.github.com/copilot_internal/v2/token
     'api.github.com',
-    // Legacy/fallback API proxy
     'copilot-proxy.githubusercontent.com',
   ],
   gemini: [
-    // Gemini API (generativelanguage) and Vertex AI (aiplatform)
-    // Source: https://ai.google.dev/gemini-api/docs/quickstart
     'generativelanguage.googleapis.com',
-    // OAuth token refresh hits oauth2.googleapis.com and www.googleapis.com
     'oauth2.googleapis.com',
     'www.googleapis.com',
   ],
   openai: [
-    // Source: https://platform.openai.com/docs/api-reference/introduction
     'api.openai.com',
   ],
   anthropic: [
-    // Source: https://docs.anthropic.com/en/api/getting-started
     'api.anthropic.com',
   ],
   ollama: [
@@ -42,14 +31,16 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
     '127.0.0.1',
   ],
   github: [
-    // General GitHub access for tools such as the gh CLI.
-    // Source: https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-githubs-ip-addresses
     'github.com',
     '*.github.com',
     '*.githubusercontent.com',
   ],
   openrouter: [
     'api.openrouter.ai'
+  ],
+  'llama.cpp': [
+    'localhost',
+    '127.0.0.1',
   ],
 }
 
