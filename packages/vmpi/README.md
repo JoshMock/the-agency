@@ -30,13 +30,9 @@ Running `pi` directly gives the agent access to your entire filesystem and unres
 
 ## Requirements
 
-- Linux (x86_64) with KVM support (`/dev/kvm`)
-- `qemu-system-x86_64`
-  - Arch: `sudo pacman -S qemu-system-x86`
-  - Ubuntu: `sudo apt install qemu-system-x86`
-- `qemu-img`
-  - Arch: `sudo pacman -S qemu-img`
-  - Ubuntu: `sudo apt install qemu-utils`
+### QEMU
+
+For both macOS and Linux, [QEMU](https://www.qemu.org/) is required. Look for installation instructions appropriate to your environment.
 
 ## Install
 
@@ -191,10 +187,9 @@ is group-readable (the default on most Linux distros with KVM enabled).
 
 ## Limitations
 
-- **Linux x86_64 only:** macOS and aarch64 are untested. The `q35` machine type
-  workaround is specific to Linux x86_64; other platforms may need adjustments.
+- **macOS and aarch64 are untested:** Support has only been tested on Linux. Other platforms may need adjustments; pull requests welcome!
 - **First run is slow:** `vmpi setup` downloads the Gondolin guest image (\~300 MB),
   downloads the pi tarball (\~4 MB), and runs `npm install` inside the VM. Subsequent runs are much faster as they resume from the checkpoint created during setup.
-- **Rootfs free space:** Gondolin's Alpine rootfs image has limited free space (~79 MiB). `vmpi setup` automatically grows the image by `rootfsExtraMb` MiB (default: 128) whenever free space is below that threshold. This requires `e2fsprogs` (`sudo apt install e2fsprogs` / `sudo pacman -S e2fsprogs`). If setup still fails with a "disk full" error, increase `rootfsExtraMb` in your `.vmpirc.json` or via `VMPI_ROOTFS_EXTRA_MB`.
+- **Rootfs free space:** Gondolin's Alpine rootfs image has limited free space (~79 MiB). `vmpi setup` automatically grows the image by `rootfsExtraMb` MiB (default: 128) whenever free space is below that threshold. If setup still fails with a "disk full" error, increase `rootfsExtraMb` in your `.vmpirc.json` or via `VMPI_ROOTFS_EXTRA_MB`.
 - **Session directory is tmpfs:** `/root`, `/tmp`, and `/var/log` are tmpfs-backed in the guest and will be dropped from memory on quit. Sessions under `/root/.pi` are visible on the host via the VFS mount and are not lost when the VM closes.
-- **Ctrl-Z does not background vmpi:** In a regular terminal, pressing `Ctrl-Z` suspends Pi. This does not work with `vmpi`. As a workaround, run `vmpi` inside [tmux](https://github.com/tmux/tmux), [screen](https://www.gnu.org/software/screen/), or [Zellij](https://zellij.dev).
+- **Ctrl-z does not background vmpi:** In a regular terminal, pressing `Ctrl-z` suspends Pi. This does not work with `vmpi`. As a workaround, run `vmpi` inside a terminal multiplexer like [tmux](https://github.com/tmux/tmux), [screen](https://www.gnu.org/software/screen/), or [Zellij](https://zellij.dev).

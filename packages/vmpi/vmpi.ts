@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { accessSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Command } from 'commander'
@@ -53,45 +53,6 @@ function die (message: string): never {
 /** Prints an informational message to stderr. */
 function info (message: string): void {
   console.error(`[vmpi] ${message}`)
-}
-
-/**
- * Checks all host prerequisites before running setup or a sandbox session.
- * Hard failures call `die()`; soft warnings (KVM unavailable) print to stderr.
- *
- * Checks:
- *   - Node.js >= 23.6.0 (Gondolin requirement)
- *   - qemu-system-x86_64 in PATH
- *   - qemu-img in PATH (required for qcow2 overlay / checkpointing)
- *   - /dev/kvm readable+writable (warns if absent; VM falls back to TCG, which is slower)
- */
-function checkPrerequisites(): void {
-  // Node.js version
-  const [nodeMajor, nodeMinor] = process.versions.node.split('.').map(Number)
-  if (nodeMajor < 23 || (nodeMajor === 23 && nodeMinor < 6)) {
-    die(`Node.js >= 23.6.0 is required (found ${process.version}). ` +
-      'Upgrade via nvm, fnm, or your package manager.')
-  }
-
-  // Required binaries
-  const required: [string, string][] = [
-    ['qemu-system-x86_64', 'Arch: sudo pacman -S qemu-system-x86 | Ubuntu: sudo apt install qemu-system-x86'],
-    ['qemu-img', 'Arch: sudo pacman -S qemu-img | Ubuntu: sudo apt install qemu-utils'],
-  ]
-  for (const [bin, hint] of required) {
-    if (spawnSync('which', [bin], { stdio: 'pipe' }).status !== 0) {
-      die(`${bin} not found. Install it and try again.\n  ${hint}`)
-    }
-  }
-
-  // KVM (soft warning — falls back to TCG emulation, which is much slower)
-  try {
-    accessSync('/dev/kvm', constants.R_OK | constants.W_OK)
-  } catch {
-    console.error('[vmpi] warning: /dev/kvm not accessible — falling back to TCG (software emulation). ' +
-      'VMs will boot significantly slower. To enable KVM: check that the kvm kernel module is loaded ' +
-      'and that your user has rw access to /dev/kvm.')
-  }
 }
 
 /**
@@ -370,7 +331,6 @@ function shellQuote (s: string): string {
  * rootfs, then saves a qcow2 disk checkpoint. Subsequent `vmpi` runs
  * resume from that checkpoint and extract the bundle to `/tmp` at startup.
  */
-  checkPrerequisites()
 async function cmdSetup (): Promise<void> {
   await ensureRootfsHeadroom()
   info('Building base checkpoint (installing pi)...')
@@ -475,7 +435,6 @@ function printDebugAudit (): void {
 }
 
 /** Runs pi in a sandboxed VM resumed from the base checkpoint. */
-  checkPrerequisites()
 async function cmdRun (args: string[]): Promise<void> {
   if (!existsSync(checkpointFile())) {
     info('No base checkpoint found — running setup first...')
