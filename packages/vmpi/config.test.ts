@@ -13,6 +13,7 @@ import {
   resolveGuestPackages,
   DEFAULT_GUEST_PACKAGES,
   resolveSecrets,
+  resolveMounts,
 } from './config.js'
 
 describe('resolveAllowedDomains', () => {
@@ -279,6 +280,19 @@ describe('loadConfig', () => {
     assert.deepEqual(cfg.postSetupHooks, ['npm install -g typescript', 'gem install rails'])
   })
 
+  it('returns empty mounts array when not configured', () => {
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.mounts, [])
+  })
+
+  it('reads mounts from config file and expands ~ in host path', () => {
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
+      mounts: [{ host: '~/.config/tool', guest: '/root/.config/tool' }],
+    }))
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.mounts, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool' }])
+  })
+
   it('finds config file in a parent directory', () => {
     const subDir = join(tmpDir, 'nested', 'child')
     mkdirSync(subDir, { recursive: true })
@@ -501,5 +515,109 @@ describe('resolveSecrets', () => {
     const hosts = ['api.github.com', 'github.com']
     const { resolved } = resolveSecrets({ GITHUB_TOKEN: { hosts } }, { GITHUB_TOKEN: 'tok' })
     assert.deepEqual(resolved.GITHUB_TOKEN?.hosts, hosts)
+  })
+})
+describe('resolveMounts', () => {
+  it('returns empty array when no mounts configured', () => {
+    assert.deepEqual(resolveMounts(undefined), [])
+  })
+
+  it('returns empty array for an empty mounts list', () => {
+    assert.deepEqual(resolveMounts([]), [])
+  })
+
+  it('passes through an absolute host path unchanged', () => {
+    const result = resolveMounts([{ host: '/some/path', guest: '/root/path' }])
+    assert.deepEqual(result, [{ host: '/some/path', guest: '/root/path' }])
+  })
+
+  it('expands a ~ prefix in host path to the home directory', () => {
+    const result = resolveMounts([{ host: '~/.config/tool', guest: '/root/.config/tool' }])
+    assert.deepEqual(result, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool' }])
+  })
+
+  it('expands a bare ~ host path to the home directory', () => {
+    const result = resolveMounts([{ host: '~', guest: '/root/home' }])
+    assert.deepEqual(result, [{ host: homedir(), guest: '/root/home' }])
+  })
+
+  it('throws when host is an empty string', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '', guest: '/root/path' }]),
+      /mounts\[0\].*host.*must be a non-empty string/
+    )
+  })
+
+  it('throws when guest is an empty string', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '/some/path', guest: '' }]),
+      /mounts\[0\].*guest.*must be a non-empty string/
+    )
+  })
+
+  it('throws when guest is not an absolute path', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '/some/path', guest: 'relative/path' }]),
+      /mounts\[0\].*guest.*must be an absolute path/
+    )
+  })
+
+  it('throws when host is whitespace-only', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '   ', guest: '/root/path' }]),
+      /mounts\[0\].*host.*must be a non-empty string/
+    )
+  })
+
+  it('throws when guest is whitespace-only', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '/some/path', guest: '   ' }]),
+      /mounts\[0\].*guest.*must be a non-empty string/
+    )
+  })
+
+  it('throws when duplicate guest mount paths are configured', () => {
+    assert.throws(
+      () => resolveMounts([
+        { host: '/first', guest: '/root/same' },
+        { host: '/second', guest: '/root/same' },
+      ]),
+      /mounts\[1\].*duplicate guest path/
+    )
+  })
+
+  it('throws when guest path is the reserved /workspace mount', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '/some/path', guest: '/workspace' }]),
+      /mounts\[0\].*reserved/
+    )
+  })
+
+  it('throws when guest path is the reserved /root/.pi mount', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '/some/path', guest: '/root/.pi' }]),
+      /mounts\[0\].*reserved/
+    )
+  })
+
+  it('resolves multiple entries independently', () => {
+    const result = resolveMounts([
+      { host: '~/.config/a', guest: '/root/.config/a' },
+      { host: '/data', guest: '/mnt/data' },
+    ])
+    assert.deepEqual(result, [
+      { host: join(homedir(), '.config/a'), guest: '/root/.config/a' },
+      { host: '/data', guest: '/mnt/data' },
+    ])
+  })
+
+  it('includes index in error message for non-first entry', () => {
+    assert.throws(
+      () => resolveMounts([
+        { host: '/ok', guest: '/root/ok' },
+        { host: '/bad', guest: 'not-absolute' },
+      ]),
+      /mounts\[1\].*guest.*must be an absolute path/
+    )
   })
 })

@@ -183,6 +183,33 @@ export interface VmpiConfig {
    * the allowed hosts and the host-side env var to read from.
    */
   secrets?: SecretsConfig
+
+  /**
+   * Arbitrary host directories to mount into the VM at runtime.
+   * Each entry maps a host path to an absolute guest path.
+   * `~` at the start of `host` is expanded to the current user's home directory.
+   *
+   * Example — expose a tool's config directory inside the VM:
+   * ```json
+   * [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
+   * ```
+   */
+  mounts?: DirectoryMount[]
+}
+
+/** A single host-to-guest directory mount mapping. */
+export interface DirectoryMount {
+  /**
+   * Absolute path (or `~`-prefixed path) on the host to mount into the VM.
+   * Example: `"~/.config/some-tool"` or `"/home/user/data"`.
+   */
+  host: string
+
+  /**
+   * Absolute path inside the VM guest where the directory will be mounted.
+   * Example: `"/root/.config/some-tool"`.
+   */
+  guest: string
 }
 
 /** A resolved local service entry with the upstream address string. */
@@ -222,6 +249,8 @@ export interface ResolvedConfig {
    * Each entry carries the guest-side name and the host env var that was expected.
    */
   missingSecrets: Array<{ name: string; envVarName: string }>
+  /** Resolved directory mounts to pass to the VM's virtual filesystem. */
+  mounts: DirectoryMount[]
 }
 
 /** Alpine packages always installed in the guest, regardless of user config. */
@@ -364,6 +393,37 @@ export function resolveLocalServices (network: NetworkConfig | undefined): Resol
 }
 
 /**
+ * Resolves and validates the `mounts` config entries.
+ * Expands a leading `~` in `host` to the current user's home directory.
+ * Throws if any entry has an empty `host` or non-absolute `guest` path.
+ */
+export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryMount[] {
+  const reservedGuestPaths = new Set(['/workspace', '/root/.pi'])
+  const seenGuests = new Set<string>()
+
+  return (mounts ?? []).map((m, i) => {
+    if (typeof m.host !== 'string') throw new Error(`mounts[${i}]: "host" must be a non-empty string`)
+    if (typeof m.guest !== 'string') throw new Error(`mounts[${i}]: "guest" must be a non-empty string`)
+
+    const hostInput = m.host.trim()
+    const guest = m.guest.trim()
+
+    if (hostInput.length === 0) throw new Error(`mounts[${i}]: "host" must be a non-empty string`)
+    if (guest.length === 0) throw new Error(`mounts[${i}]: "guest" must be a non-empty string`)
+    if (!guest.startsWith('/')) throw new Error(`mounts[${i}]: "guest" must be an absolute path (got: "${guest}")`)
+    if (reservedGuestPaths.has(guest)) throw new Error(`mounts[${i}]: "guest" path "${guest}" is reserved`)
+    if (seenGuests.has(guest)) throw new Error(`mounts[${i}]: duplicate guest path "${guest}"`)
+
+    seenGuests.add(guest)
+
+    const host = hostInput.startsWith('~/')
+      ? join(homedir(), hostInput.slice(2))
+      : hostInput === '~' ? homedir() : hostInput
+    return { host, guest }
+  })
+}
+
+/**
  * Loads vmpi configuration from cosmiconfig search paths and environment
  * variable overrides, returning a fully resolved config with defaults applied.
  *
@@ -391,6 +451,7 @@ export function loadConfig (): ResolvedConfig {
   const guestPackages = resolveGuestPackages(file.guestPackages)
   const postSetupHooks = file.postSetupHooks ?? []
   const { resolved: secrets, missing: missingSecrets } = resolveSecrets(file.secrets)
+  const mounts = resolveMounts(file.mounts)
 
   if (policy === 'deny-all' && allowedDomains.length > 0) {
     throw new Error(
@@ -399,7 +460,7 @@ export function loadConfig (): ResolvedConfig {
     )
   }
 
-  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, network: { policy, allowedDomains, localServices } }
+  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, mounts, network: { policy, allowedDomains, localServices } }
 }
 
 /** Parses a string as a number, returning undefined for missing/NaN values. */

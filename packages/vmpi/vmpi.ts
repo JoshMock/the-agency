@@ -441,7 +441,7 @@ async function cmdRun (args: string[]): Promise<void> {
     await cmdSetup()
   }
 
-  const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets } = getConfig()
+  const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts } = getConfig()
   const { httpHooks, guestEnv } = buildHttpHooks(secrets)
 
   for (const { name, envVarName } of missingSecrets) {
@@ -473,6 +473,9 @@ async function cmdRun (args: string[]): Promise<void> {
 
   info('Resuming sandbox VM from checkpoint...')
   const checkpoint = VmCheckpoint.load(checkpointFile())
+  const userMountProviders = Object.fromEntries(
+    mounts.map(m => [m.guest, new RealFSProvider(m.host)])
+  )
   const vm = await checkpoint.resume({
     sandbox: sandboxOptions(),
     memory: `${memory}M`,
@@ -486,6 +489,7 @@ async function cmdRun (args: string[]): Promise<void> {
       mounts: {
         '/workspace': new RealFSProvider(process.cwd()),
         '/root/.pi': new RealFSProvider(piConfigSnapshotDir),
+        ...userMountProviders,
       },
     },
   })
@@ -598,6 +602,9 @@ Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
                                   { "GITHUB_TOKEN": { "hosts": ["api.github.com"] } }
                                 Override the host-side var name with "env":
                                   { "GITHUB_TOKEN": { "hosts": ["api.github.com"], "env": "MY_PAT" } }
+  mounts                        Host directories to mount into the VM at runtime.
+                                Each entry maps a host path to an absolute guest path.
+                                  [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
 
 Example .vmpirc.json (using the gh CLI with a GitHub token):
   {
