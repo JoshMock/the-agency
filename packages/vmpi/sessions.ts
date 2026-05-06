@@ -6,7 +6,7 @@ import { join } from 'node:path'
  * the two paths reside on different filesystems. `rename(2)` raises EXDEV when
  * crossing a mount boundary (e.g. /tmp on tmpfs to ~/.pi on ext4).
  */
-function moveFile(src: string, dest: string): void {
+function moveFile (src: string, dest: string): void {
   try {
     renameSync(src, dest)
   } catch (err: unknown) {
@@ -23,7 +23,7 @@ function moveFile(src: string, dest: string): void {
  *
  * Example: `/home/alice/Code/my-project` → `--home-alice-Code-my-project--`
  */
-export function cwdToSessionDirName(cwd: string): string {
+export function cwdToSessionDirName (cwd: string): string {
   const inner = cwd.replace(/^\//, '').replace(/\//g, '-')
   return `--${inner}--`
 }
@@ -40,7 +40,7 @@ export function cwdToSessionDirName(cwd: string): string {
  *
  * Example: `--home-alice-Code-my-project--` → `/home/alice/Code/my-project`
  */
-export function sessionDirNameToCwd(dirName: string): string {
+export function sessionDirNameToCwd (dirName: string): string {
   const inner = dirName.replace(/^--/, '').replace(/--$/, '')
   return '/' + inner.replace(/-/g, '/')
 }
@@ -56,7 +56,7 @@ export function sessionDirNameToCwd(dirName: string): string {
  * If no matching session directory exists on the host, this is a no-op.
  * If `hostCwd` is already `/workspace`, the slot is already in the right place.
  */
-export function prepareSessionsForVm(hostCwd: string, piConfigDir: string): void {
+export function prepareSessionsForVm (hostCwd: string, piConfigDir: string): void {
   const hostDirName = cwdToSessionDirName(hostCwd)
   const vmDirName = cwdToSessionDirName('/workspace')
 
@@ -93,10 +93,10 @@ export function prepareSessionsForVm(hostCwd: string, piConfigDir: string): void
  * This is a no-op when `hostCwd` is `/workspace` or if no `--workspace--`
  * directory exists.
  */
-export function collectSessionsFromVm(
+export function collectSessionsFromVm (
   hostCwd: string,
   snapshotDir: string,
-  hostPiConfigDir: string = snapshotDir,
+  hostPiConfigDir: string = snapshotDir
 ): void {
   const hostDirName = cwdToSessionDirName(hostCwd)
   const vmDirName = cwdToSessionDirName('/workspace')

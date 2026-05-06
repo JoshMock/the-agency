@@ -4,7 +4,9 @@
   "description": "Route tasks to Pi agents based on capability",
   "main": "index.ts",
   "scripts": {
-    "test": "node --experimental-transform-types index.test.ts"
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "test": "npm run lint && node --experimental-transform-types index.test.ts"
   },
   "keywords": [
     "pi-package",

@@ -173,7 +173,7 @@ export class PauseNode extends TaskNode {
     name: string,
     handler: PauseHandler,
     message?: string,
-    deps: TaskNode[] = [],
+    deps: TaskNode[] = []
   ) {
     super(name, () => handler({ name, message }), deps)
     this.message = message

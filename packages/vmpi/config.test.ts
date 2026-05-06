@@ -63,14 +63,14 @@ describe('resolveAllowedDomains', () => {
   it('throws for an unknown provider name', () => {
     assert.throws(
       () => resolveAllowedDomains({ providers: ['not-a-real-provider'] }),
-      /Unknown provider "not-a-real-provider"/,
+      /Unknown provider "not-a-real-provider"/
     )
   })
 
   it('lists all known providers in the error message', () => {
     assert.throws(
       () => resolveAllowedDomains({ providers: ['bogus'] }),
-      new RegExp(Object.keys(PROVIDER_DOMAINS).join(', ')),
+      new RegExp(Object.keys(PROVIDER_DOMAINS).join(', '))
     )
   })
 })
@@ -336,7 +336,6 @@ describe('loadConfig', () => {
     })
     delete process.env.VMPI_TEST_SECRET_A
   })
-
 })
 
 describe('resolveGuestPackages', () => {
@@ -393,39 +392,39 @@ describe('resolveLocalServices', () => {
   it('throws for missing hostname', () => {
     assert.throws(
       () => resolveLocalServices({ localServices: [{ hostname: '', port: 8080 }] }),
-      /hostname.*must be a non-empty string/,
+      /hostname.*must be a non-empty string/
     )
   })
 
   it('throws when hostname is an IPv4 address', () => {
     assert.throws(
       () => resolveLocalServices({ localServices: [{ hostname: '127.0.0.1', port: 8080 }] }),
-      /hostname.*must be a DNS name, not an IP address/,
+      /hostname.*must be a DNS name, not an IP address/
     )
   })
 
   it('throws when hostname contains a colon (IP:port syntax)', () => {
     assert.throws(
       () => resolveLocalServices({ localServices: [{ hostname: '127.0.0.1:8080', port: 8080 }] }),
-      /hostname.*must be a DNS name, not an IP address/,
+      /hostname.*must be a DNS name, not an IP address/
     )
   })
 
   it('throws for port out of range', () => {
     assert.throws(
       () => resolveLocalServices({ localServices: [{ hostname: 'x.local', port: 0 }] }),
-      /port.*must be an integer/,
+      /port.*must be an integer/
     )
     assert.throws(
       () => resolveLocalServices({ localServices: [{ hostname: 'x.local', port: 65536 }] }),
-      /port.*must be an integer/,
+      /port.*must be an integer/
     )
   })
 
   it('throws for non-integer port', () => {
     assert.throws(
       () => resolveLocalServices({ localServices: [{ hostname: 'x.local', port: 8080.5 }] }),
-      /port.*must be an integer/,
+      /port.*must be an integer/
     )
   })
 })
@@ -446,7 +445,7 @@ describe('resolveSecrets', () => {
   it('resolves a secret whose env var is present', () => {
     const { resolved, missing } = resolveSecrets(
       { GITHUB_TOKEN: { hosts: ['api.github.com'] } },
-      { GITHUB_TOKEN: 'ghp_abc123' },
+      { GITHUB_TOKEN: 'ghp_abc123' }
     )
     assert.deepEqual(resolved, {
       GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'ghp_abc123' },
@@ -457,7 +456,7 @@ describe('resolveSecrets', () => {
   it('reports missing secret when env var is absent', () => {
     const { resolved, missing } = resolveSecrets(
       { MISSING_TOKEN: { hosts: ['api.example.com'] } },
-      {},
+      {}
     )
     assert.deepEqual(resolved, {})
     assert.deepEqual(missing, [{ name: 'MISSING_TOKEN', envVarName: 'MISSING_TOKEN' }])
@@ -470,7 +469,7 @@ describe('resolveSecrets', () => {
         TOKEN_B: { hosts: ['b.example.com'] },
         TOKEN_C: { hosts: ['c.example.com'] },
       },
-      { TOKEN_A: 'hello', TOKEN_C: 'world' },
+      { TOKEN_A: 'hello', TOKEN_C: 'world' }
     )
     assert.deepEqual(resolved, {
       TOKEN_A: { hosts: ['a.example.com'], value: 'hello' },
@@ -482,7 +481,7 @@ describe('resolveSecrets', () => {
   it('reads the value from a different host env var when "env" is set', () => {
     const { resolved, missing } = resolveSecrets(
       { GITHUB_TOKEN: { hosts: ['api.github.com'], env: 'MY_PAT' } },
-      { MY_PAT: 'ghp_xyz' },
+      { MY_PAT: 'ghp_xyz' }
     )
     assert.deepEqual(resolved, {
       GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'ghp_xyz' },
@@ -493,7 +492,7 @@ describe('resolveSecrets', () => {
   it('prefers the "env" var name over the key name when both are present', () => {
     const { resolved } = resolveSecrets(
       { GITHUB_TOKEN: { hosts: ['api.github.com'], env: 'MY_PAT' } },
-      { GITHUB_TOKEN: 'wrong', MY_PAT: 'correct' },
+      { GITHUB_TOKEN: 'wrong', MY_PAT: 'correct' }
     )
     assert.equal(resolved.GITHUB_TOKEN?.value, 'correct')
   })

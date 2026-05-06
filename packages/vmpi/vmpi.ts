@@ -33,26 +33,25 @@ let debugDeniedHosts: Set<string> | null = null
  */
 let debugMissingExes: Set<string> | null = null
 
-
 /** Lazily loads and caches the resolved configuration. */
-function getConfig(): ResolvedConfig {
+function getConfig (): ResolvedConfig {
   if (_config == null) _config = loadConfig()
   return _config
 }
 
 /** Path to the qcow2 base checkpoint file. */
-function checkpointFile(): string {
+function checkpointFile (): string {
   return join(getConfig().stateDir, 'base-checkpoint.qcow2')
 }
 
 /** Prints a fatal error to stderr and exits with code 1. */
-function die(message: string): never {
+function die (message: string): never {
   console.error(`[vmpi] error: ${message}`)
   process.exit(1)
 }
 
 /** Prints an informational message to stderr. */
-function info(message: string): void {
+function info (message: string): void {
   console.error(`[vmpi] ${message}`)
 }
 
@@ -104,7 +103,7 @@ function checkPrerequisites(): void {
  * Skipped entirely if the rootfs already has sufficient headroom.
  * The `rootfsExtraMb` value comes from config (default: 128).
  */
-async function ensureRootfsHeadroom(): Promise<void> {
+async function ensureRootfsHeadroom (): Promise<void> {
   const { ensureGuestAssets } = await import('@earendil-works/gondolin')
   const assets = await ensureGuestAssets()
   const rootfsPath = assets.rootfsPath
@@ -156,7 +155,7 @@ async function ensureRootfsHeadroom(): Promise<void> {
  * - sets `console: 'none'` so QEMU uses `-serial null` instead of `-serial stdio`,
  *   keeping the Node.js event loop free and the Pi TUI responsive
  */
-function sandboxOptions(): VMOptions['sandbox'] {
+function sandboxOptions (): VMOptions['sandbox'] {
   const opts: VMOptions['sandbox'] = {}
   if (process.platform === 'linux' && process.arch === 'x64') {
     opts.machineType = 'q35'
@@ -169,7 +168,7 @@ function sandboxOptions(): VMOptions['sandbox'] {
  * Returns the debug log callback when `--debug` is active, otherwise null
  * (suppresses all Gondolin debug output).
  */
-function debugLog(): VMOptions['debugLog'] {
+function debugLog (): VMOptions['debugLog'] {
   if (!debugMode) return null
   return (component: DebugComponent, message: string) => {
     process.stderr.write(`[gondolin:${component}] ${message}\n`)
@@ -182,7 +181,7 @@ function debugLog(): VMOptions['debugLog'] {
  * In debug mode both streams are shown, prefixed with [stdout]/[stderr].
  * Throws if the command exits with a non-zero code.
  */
-async function vmExec(vm: VM, cmd: string, { forwardStdout = true }: { forwardStdout?: boolean } = {}): Promise<void> {
+async function vmExec (vm: VM, cmd: string, { forwardStdout = true }: { forwardStdout?: boolean } = {}): Promise<void> {
   // Use array form (/bin/sh -c) rather than string form (/bin/sh -lc) because
   // the Alpine login shell doesn't populate PATH, so `npm`, `pi`, etc. are not
   // found when using the login-shell string shorthand.
@@ -214,7 +213,7 @@ async function vmExec(vm: VM, cmd: string, { forwardStdout = true }: { forwardSt
  *     extract to /tmp (tmpfs, ~50% of VM RAM) on each run; 512 MiB RAM gives
  *     ~256 MiB of tmpfs, which comfortably fits the ~180 MB extracted bundle
  */
-async function buildPiBundle(): Promise<Buffer> {
+async function buildPiBundle (): Promise<Buffer> {
   const cacheDir = join(getConfig().stateDir, 'cache')
   const registryUrl = 'https://registry.npmjs.org/@mariozechner%2Fpi-coding-agent'
 
@@ -270,7 +269,7 @@ async function buildPiBundle(): Promise<Buffer> {
 
   const npmResult = spawnSync(
     'npm', ['install', tarballPath, '--save'],
-    { cwd: installDir, stdio: 'inherit' },
+    { cwd: installDir, stdio: 'inherit' }
   )
   if (npmResult.status !== 0) throw new Error('npm install failed while building pi bundle')
 
@@ -282,7 +281,7 @@ async function buildPiBundle(): Promise<Buffer> {
     const specs = npmPackages.map(p => p.slice('npm:'.length))
     const pkgResult = spawnSync(
       'npm', ['install', ...specs, '--save', '--legacy-peer-deps'],
-      { cwd: installDir, stdio: 'inherit' },
+      { cwd: installDir, stdio: 'inherit' }
     )
     if (pkgResult.status !== 0) {
       info('Warning: some pi packages failed to install — they will be skipped in the VM')
@@ -294,7 +293,7 @@ async function buildPiBundle(): Promise<Buffer> {
   mkdirSync(cacheDir, { recursive: true })
   const archiveResult = spawnSync(
     'tar', ['czf', bundlePath, 'node_modules'],
-    { cwd: installDir, stdio: 'inherit' },
+    { cwd: installDir, stdio: 'inherit' }
   )
   if (archiveResult.status !== 0) throw new Error('tar failed while archiving pi bundle')
 
@@ -316,8 +315,8 @@ async function buildPiBundle(): Promise<Buffer> {
  * For `allow-all` policy no hooks are created (unrestricted egress). Secrets
  * are still resolved so their `env` values reach the guest.
  */
-function buildHttpHooks(
-  secrets: Record<string, import('./config.js').ResolvedSecretEntry>,
+function buildHttpHooks (
+  secrets: Record<string, import('./config.js').ResolvedSecretEntry>
 ): { httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'] | undefined; guestEnv: Record<string, string> } {
   const { policy, allowedDomains, localServices } = getConfig().network
   const internalHostnames = localServices.map(s => s.hostname)
@@ -361,7 +360,7 @@ function buildHttpHooks(
  * Wraps a string in POSIX single-quotes, escaping any embedded single-quote
  * characters. Safe to use in `/bin/sh` scripts.
  */
-function shellQuote(s: string): string {
+function shellQuote (s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`
 }
 
@@ -371,8 +370,8 @@ function shellQuote(s: string): string {
  * rootfs, then saves a qcow2 disk checkpoint. Subsequent `vmpi` runs
  * resume from that checkpoint and extract the bundle to `/tmp` at startup.
  */
-async function cmdSetup(): Promise<void> {
   checkPrerequisites()
+async function cmdSetup (): Promise<void> {
   await ensureRootfsHeadroom()
   info('Building base checkpoint (installing pi)...')
   mkdirSync(getConfig().stateDir, { recursive: true })
@@ -437,7 +436,7 @@ async function cmdSetup(): Promise<void> {
 }
 
 /** Shows checkpoint status. */
-function cmdStatus(): void {
+function cmdStatus (): void {
   const cpPath = checkpointFile()
   if (existsSync(cpPath)) {
     let extra = ''
@@ -459,7 +458,7 @@ function cmdStatus(): void {
  * Lists any hostnames the VM was denied access to and any executables it
  * tried to invoke but could not find. Called only in --debug mode.
  */
-function printDebugAudit(): void {
+function printDebugAudit (): void {
   const deniedList = debugDeniedHosts != null ? [...debugDeniedHosts].sort() : []
   const missingList = debugMissingExes != null ? [...debugMissingExes].sort() : []
   if (deniedList.length === 0 && missingList.length === 0) return
@@ -476,8 +475,8 @@ function printDebugAudit(): void {
 }
 
 /** Runs pi in a sandboxed VM resumed from the base checkpoint. */
-async function cmdRun(args: string[]): Promise<void> {
   checkPrerequisites()
+async function cmdRun (args: string[]): Promise<void> {
   if (!existsSync(checkpointFile())) {
     info('No base checkpoint found — running setup first...')
     await cmdSetup()
@@ -513,7 +512,7 @@ async function cmdRun(args: string[]): Promise<void> {
   }
   cpSync(piConfigDir, piConfigSnapshotDir, { recursive: true, preserveTimestamps: true })
 
-  info(`Resuming sandbox VM from checkpoint...`)
+  info('Resuming sandbox VM from checkpoint...')
   const checkpoint = VmCheckpoint.load(checkpointFile())
   const vm = await checkpoint.resume({
     sandbox: sandboxOptions(),

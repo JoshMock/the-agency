@@ -12,7 +12,9 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build",
-    "test": "node --import tsx/esm --test *.test.ts",
+    "test": "npm run lint && node --import tsx/esm --test *.test.ts",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [

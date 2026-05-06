@@ -12,7 +12,7 @@ import {
 } from './sessions.js'
 
 /** Creates a temporary pi config dir, returning its path and a cleanup function. */
-function makeTmpPiDir(): { piDir: string; cleanup: () => void } {
+function makeTmpPiDir (): { piDir: string; cleanup: () => void } {
   const piDir = join(tmpdir(), `vmpi-sessions-test-${Date.now()}`)
   mkdirSync(piDir, { recursive: true })
   return { piDir, cleanup: () => rmSync(piDir, { recursive: true, force: true }) }
@@ -22,7 +22,7 @@ function makeTmpPiDir(): { piDir: string; cleanup: () => void } {
  * Resolves the sessions dir paths for a given host CWD inside a pi config dir.
  * Creates the sessions parent directory but not the session subdirectories.
  */
-function sessionPaths(piDir: string, hostCwd: string): {
+function sessionPaths (piDir: string, hostCwd: string): {
   sessionsDir: string
   hostSessionDir: string
   vmSessionDir: string
@@ -39,7 +39,7 @@ describe('cwdToSessionDirName', () => {
   it('encodes a typical absolute path', () => {
     assert.equal(
       cwdToSessionDirName('/home/alice/Code/my-project'),
-      '--home-alice-Code-my-project--',
+      '--home-alice-Code-my-project--'
     )
   })
 
@@ -54,14 +54,14 @@ describe('cwdToSessionDirName', () => {
   it('encodes a path whose segments already contain dashes', () => {
     assert.equal(
       cwdToSessionDirName('/home/alice/my-proj'),
-      '--home-alice-my-proj--',
+      '--home-alice-my-proj--'
     )
   })
 
   it('encodes a deep nested path', () => {
     assert.equal(
       cwdToSessionDirName('/home/alice/Code/the-agency/packages/vmpi'),
-      '--home-alice-Code-the-agency-packages-vmpi--',
+      '--home-alice-Code-the-agency-packages-vmpi--'
     )
   })
 
@@ -83,7 +83,7 @@ describe('sessionDirNameToCwd', () => {
   it('decodes a path with no dashes in segments', () => {
     assert.equal(
       sessionDirNameToCwd('--home-alice-Code--'),
-      '/home/alice/Code',
+      '/home/alice/Code'
     )
   })
 })
@@ -136,7 +136,7 @@ describe('prepareSessionsForVm', () => {
     const copiedNew = statSync(join(vmSessionDir, 'new-session.jsonl'))
     assert.ok(
       copiedNew.mtimeMs > copiedOld.mtimeMs,
-      `newer session mtime (${copiedNew.mtimeMs}) should be greater than older session mtime (${copiedOld.mtimeMs})`,
+      `newer session mtime (${copiedNew.mtimeMs}) should be greater than older session mtime (${copiedOld.mtimeMs})`
     )
   })
 
@@ -238,20 +238,20 @@ describe('collectSessionsFromVm', () => {
     assert.ok(existsSync(vmSessionDir))
   })
 
- it('writes session files to hostPiConfigDir when it differs from snapshotDir', () => {
-   const { piDir: snapshotDir, cleanup: cleanupSnapshot } = makeTmpPiDir()
-   try {
-     const { vmSessionDir } = sessionPaths(snapshotDir, '/home/alice/myproject')
-     const { hostSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
-     mkdirSync(vmSessionDir, { recursive: true })
-     writeFileSync(join(vmSessionDir, 'new-session.json'), '"new"')
+  it('writes session files to hostPiConfigDir when it differs from snapshotDir', () => {
+    const { piDir: snapshotDir, cleanup: cleanupSnapshot } = makeTmpPiDir()
+    try {
+      const { vmSessionDir } = sessionPaths(snapshotDir, '/home/alice/myproject')
+      const { hostSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
+      mkdirSync(vmSessionDir, { recursive: true })
+      writeFileSync(join(vmSessionDir, 'new-session.json'), '"new"')
 
-     collectSessionsFromVm('/home/alice/myproject', snapshotDir, piDir)
+      collectSessionsFromVm('/home/alice/myproject', snapshotDir, piDir)
 
-     assert.ok(!existsSync(vmSessionDir), '--workspace-- removed from snapshot')
-     assert.ok(existsSync(join(hostSessionDir, 'new-session.json')), 'session written to real host config dir')
-   } finally {
-     cleanupSnapshot()
-   }
- })
+      assert.ok(!existsSync(vmSessionDir), '--workspace-- removed from snapshot')
+      assert.ok(existsSync(join(hostSessionDir, 'new-session.json')), 'session written to real host config dir')
+    } finally {
+      cleanupSnapshot()
+    }
+  })
 })

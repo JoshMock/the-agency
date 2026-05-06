@@ -48,7 +48,7 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
     '*.github.com',
     '*.githubusercontent.com',
   ],
-  'openrouter': [
+  openrouter: [
     'api.openrouter.ai'
   ],
 }
@@ -261,7 +261,7 @@ export const DEFAULT_GUEST_PACKAGES: readonly string[] = [
  * Always includes `DEFAULT_GUEST_PACKAGES`; appends any extra packages from
  * the config without duplicates.
  */
-export function resolveGuestPackages(extra: string[] | undefined): string[] {
+export function resolveGuestPackages (extra: string[] | undefined): string[] {
   const result = new Set(DEFAULT_GUEST_PACKAGES)
   for (const pkg of extra ?? []) result.add(pkg)
   return [...result]
@@ -293,9 +293,9 @@ export interface ResolvedSecretsResult {
  * The optional `env` parameter defaults to `process.env` and exists only to
  * make this function unit-testable without polluting the real environment.
  */
-export function resolveSecrets(
+export function resolveSecrets (
   secrets: SecretsConfig | undefined,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = process.env
 ): ResolvedSecretsResult {
   const resolved: Record<string, ResolvedSecretEntry> = {}
   const missing: Array<{ name: string; envVarName: string }> = []
@@ -314,7 +314,7 @@ export function resolveSecrets(
 /**
  * Resolves the effective allowed-domain list from providers and explicit domains.
  */
-export function resolveAllowedDomains(network: NetworkConfig | undefined): string[] {
+export function resolveAllowedDomains (network: NetworkConfig | undefined): string[] {
   const domains = new Set<string>()
 
   for (const provider of network?.providers ?? []) {
@@ -338,9 +338,9 @@ export function resolveAllowedDomains(network: NetworkConfig | undefined): strin
  * If an explicit policy is set, it is used directly. Otherwise, the policy is
  * inferred: `"custom"` when any domains are configured, `"deny-all"` otherwise.
  */
-export function resolvePolicy(
+export function resolvePolicy (
   network: NetworkConfig | undefined,
-  allowedDomains: string[],
+  allowedDomains: string[]
 ): 'allow-all' | 'deny-all' | 'custom' {
   if (network?.policy != null) return network.policy
 
@@ -351,7 +351,7 @@ export function resolvePolicy(
  * Resolves and validates the `localServices` config entries.
  * Throws if any entry has an invalid hostname or port.
  */
-export function resolveLocalServices(network: NetworkConfig | undefined): ResolvedLocalService[] {
+export function resolveLocalServices (network: NetworkConfig | undefined): ResolvedLocalService[] {
   return (network?.localServices ?? []).map((svc, i) => {
     if (!svc.hostname || typeof svc.hostname !== 'string') {
       throw new Error(`network.localServices[${i}]: "hostname" must be a non-empty string`)
@@ -362,7 +362,7 @@ export function resolveLocalServices(network: NetworkConfig | undefined): Resolv
     if (/^\d+\.\d+\.\d+\.\d+$/.test(svc.hostname) || svc.hostname.includes(':')) {
       throw new Error(
         `network.localServices[${i}]: "hostname" must be a DNS name, not an IP address. ` +
-        `Use a name like "my-service.local" and set "port" to the host port (e.g. 8080).`,
+        'Use a name like "my-service.local" and set "port" to the host port (e.g. 8080).'
       )
     }
     if (!Number.isInteger(svc.port) || svc.port < 1 || svc.port > 65535) {
@@ -380,7 +380,7 @@ export function resolveLocalServices(network: NetworkConfig | undefined): Resolv
  * the current working directory and walking up the file tree to the home
  * directory.
  */
-export function loadConfig(): ResolvedConfig {
+export function loadConfig (): ResolvedConfig {
   const explorer = cosmiconfigSync('vmpi', {
     searchPlaces: ['.vmpirc.json', '.vmpirc.yaml', '.vmpirc.yml'],
     searchStrategy: 'global',
@@ -404,7 +404,7 @@ export function loadConfig(): ResolvedConfig {
   if (policy === 'deny-all' && allowedDomains.length > 0) {
     throw new Error(
       'Network policy is "deny-all" but providers or allowedDomains are configured. ' +
-      'Use policy "custom" to allow specific domains, or remove the domain lists.',
+      'Use policy "custom" to allow specific domains, or remove the domain lists.'
     )
   }
 
@@ -412,7 +412,7 @@ export function loadConfig(): ResolvedConfig {
 }
 
 /** Parses a string as a number, returning undefined for missing/NaN values. */
-function num(value: string | undefined): number | undefined {
+function num (value: string | undefined): number | undefined {
   if (value == null) return undefined
   const n = Number(value)
   return Number.isNaN(n) ? undefined : n

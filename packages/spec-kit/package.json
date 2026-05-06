@@ -10,7 +10,9 @@
     "agents"
   ],
   "scripts": {
-    "test": "node --experimental-transform-types --test extensions/index.test.ts && bash specify-templates/scripts/bash/common.test.sh"
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "test": "npm run lint && node --experimental-transform-types --test extensions/index.test.ts && bash specify-templates/scripts/bash/common.test.sh"
   },
   "files": [
     "extensions/**",

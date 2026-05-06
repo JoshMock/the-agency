@@ -6,9 +6,9 @@ import { createHttpHooks, type HttpIpAllowInfo } from '@earendil-works/gondolin'
  * Wraps `httpHooks.isIpAllowed` to record denied hostnames into a set.
  * This mirrors the production logic in `buildHttpHooks`.
  */
-function withDeniedHostTracking(
+function withDeniedHostTracking (
   httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'],
-  denied: Set<string>,
+  denied: Set<string>
 ): void {
   const inner = httpHooks.isIpAllowed
   httpHooks.isIpAllowed = async (info: HttpIpAllowInfo) => {
