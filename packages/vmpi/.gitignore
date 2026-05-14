@@ -1,3 +1,4 @@
 dist/
 *.js
+!eslint.config.js
 *.d.ts
