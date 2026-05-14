@@ -31,7 +31,8 @@
     "node": ">=20.0.0"
   },
   "os": [
-    "linux"
+    "linux",
+    "darwin"
   ],
   "dependencies": {
     "@earendil-works/gondolin": "^0.7.0",
