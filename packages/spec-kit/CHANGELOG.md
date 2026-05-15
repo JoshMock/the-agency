@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.4...pi-spec-kit-v0.2.5) (2026-05-15)
+
+
+### Bug Fixes
+
+* add darwin to supported engines ([#83](https://github.com/JoshMock/the-agency/issues/83)) ([5031f23](https://github.com/JoshMock/the-agency/commit/5031f23820bc8434b320f08b2b7607aa3695479c))
+
 ## [0.2.4](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.3...pi-spec-kit-v0.2.4) (2026-04-16)
 
 
