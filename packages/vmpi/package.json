@@ -12,7 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build",
-    "test": "npm run lint && node --import tsx/esm --test *.test.ts",
+    "test": "npm run lint && node --import tsx --test *.test.ts",
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
     "typecheck": "tsc --noEmit"
@@ -31,10 +31,12 @@
     "node": ">=20.0.0"
   },
   "os": [
-    "linux"
+    "linux",
+    "darwin"
   ],
   "dependencies": {
-    "@earendil-works/gondolin": "^0.7.0",
+    "@earendil-works/gondolin": "^0.10.0",
+    "cbor2": "^2.3.0",
     "commander": "^14.0.3",
     "cosmiconfig": "^9.0.1"
   },
