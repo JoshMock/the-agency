@@ -1,6 +1,6 @@
 {
   "name": "@the-agency/pi-observability",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Record tool usage, tokens, models, skills, and sessions as JSONL timeseries data in OpenTelemetry format.",
   "type": "module",
   "main": "index.ts",

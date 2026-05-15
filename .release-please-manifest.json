@@ -3,5 +3,5 @@
   "packages/tokenshrink": "0.1.2",
   "packages/spec-kit": "0.2.5",
   "packages/vmpi": "0.4.0",
-  "packages/observability": "0.2.0"
+  "packages/observability": "0.2.1"
 }
