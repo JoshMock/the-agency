@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.3.0...vmpi-v0.4.0) (2026-05-15)
+
+
+### Features
+
+* add llama.cpp support ([#80](https://github.com/JoshMock/the-agency/issues/80)) ([8cf1a8a](https://github.com/JoshMock/the-agency/commit/8cf1a8add840063bf3bba2438db977b48e6b2c9e))
+* log all blocked hostnames, missing executables when --debug flag is on ([#68](https://github.com/JoshMock/the-agency/issues/68)) ([23e21c3](https://github.com/JoshMock/the-agency/commit/23e21c3a3b791ed3286e757d5b52399c3fe0e18c))
+* mount directories ([#81](https://github.com/JoshMock/the-agency/issues/81)) ([b315796](https://github.com/JoshMock/the-agency/commit/b315796ce9fe995c8ace108374dfbbcd55fa42be))
+* post-setup hooks ([#70](https://github.com/JoshMock/the-agency/issues/70)) ([1aac153](https://github.com/JoshMock/the-agency/commit/1aac153f5673179039eded86921643bd1f695b7b))
+* stop prereq check ([#79](https://github.com/JoshMock/the-agency/issues/79)) ([a4fd341](https://github.com/JoshMock/the-agency/commit/a4fd341e05a491a257fa14a1af6940e6fa760848))
+
+
+### Bug Fixes
+
+* add darwin to supported engines ([#83](https://github.com/JoshMock/the-agency/issues/83)) ([5031f23](https://github.com/JoshMock/the-agency/commit/5031f23820bc8434b320f08b2b7607aa3695479c))
+* update Pi package location ([#82](https://github.com/JoshMock/the-agency/issues/82)) ([0196312](https://github.com/JoshMock/the-agency/commit/0196312c30f32dfb726dfc37e4b981e4d265d196))
+
 ## [0.3.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.2.0...vmpi-v0.3.0) (2026-04-29)
 
 
