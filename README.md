@@ -6,7 +6,7 @@ A collection of extensions, skills, tools and experiments with the [Pi coding ag
 - [**@the-agency/pi-hashline-edit**](./packages/hashline-edit/): alternate to Pi's built in `edit` tool that improves the accuracy and efficiency of file edits, with high potential to reduce token usage
 - [**@the-agency/pi-spec-kit**](./packages/spec-kit/): use [Spec Kit](https://github.com/github/spec-kit) for spec-driven development
 - [**@the-agency/vmpi**](./packages/vmpi/): run `pi` sandboxed in a QEMU microVM via [Gondolin](https://earendil-works.github.io/gondolin/) -- hardware-isolated, no root required
-- [**@the-agency/pi-observability**](./packages/vmpi/): record OpenTelemetry logs for your Pi sessions
+- [**@the-agency/pi-observability**](./packages/observability/): record OpenTelemetry logs for your Pi sessions
 
 ## Goals
 
