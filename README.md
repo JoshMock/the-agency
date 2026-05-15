@@ -2,10 +2,11 @@ A collection of extensions, skills, tools and experiments with the [Pi coding ag
 
 ## Current offerings
 
-- [**pi-tokenshrink**](./packages/tokenshrink/): reduce a prompt's token count deterministically, without using inference
-- [**pi-hashline-edit**](./packages/hashline-edit/): alternate to Pi's built in `edit` tool that improves the accuracy and efficiency of file edits, with high potential to reduce token usage
-- [**pi-spec-kit**](./packages/spec-kit/): use [Spec Kit](https://github.com/github/spec-kit) for spec-driven development
-- [**vmpi**](./packages/vmpi/): run `pi` sandboxed in a QEMU microVM via [Gondolin](https://earendil-works.github.io/gondolin/) -- hardware-isolated, no root required
+- [**@the-agency/pi-tokenshrink**](./packages/tokenshrink/): reduce a prompt's token count deterministically, without using inference
+- [**@the-agency/pi-hashline-edit**](./packages/hashline-edit/): alternate to Pi's built in `edit` tool that improves the accuracy and efficiency of file edits, with high potential to reduce token usage
+- [**@the-agency/pi-spec-kit**](./packages/spec-kit/): use [Spec Kit](https://github.com/github/spec-kit) for spec-driven development
+- [**@the-agency/vmpi**](./packages/vmpi/): run `pi` sandboxed in a QEMU microVM via [Gondolin](https://earendil-works.github.io/gondolin/) -- hardware-isolated, no root required
+- [**@the-agency/pi-observability**](./packages/vmpi/): record OpenTelemetry logs for your Pi sessions
 
 ## Goals
 
@@ -17,7 +18,7 @@ Local inference also enables experimentation with open models that have been tra
 
 ### Security
 
-Tools and experiments will ideally build on the use of containers or other tools (e.g. [nono](https://nono.sh/)) that limit the blast radius of an agent. [pi-guardrails](https://www.npmjs.com/package/@aliou/pi-guardrails) is a great start, but there are many ways to work around it.
+  See [vmpi](./packages/vmpi/). [pi-guardrails](https://www.npmjs.com/package/@aliou/pi-guardrails) is a handy UX improvement, but it's not a security feature. Even running in a Docker container or a process-level sandbox is not bulletproof. If you're installing packages from npm, *especially* if they're developed with agent assistance, all that code should be isolated from the rest of your system. Running your agent&mdash;and its extensions, tools and skills&mdash;in a virtual machine is the safest way to protect your machine from errant agent choices and supply-chain attacks.
 
 ### Do less, better
 
