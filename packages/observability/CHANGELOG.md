@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/JoshMock/the-agency/compare/pi-observability-v0.2.0...pi-observability-v0.2.1) (2026-05-15)
+
+
+### Bug Fixes
+
+* README was out of date ([#84](https://github.com/JoshMock/the-agency/issues/84)) ([ad73adb](https://github.com/JoshMock/the-agency/commit/ad73adb012c14aed8c4ba5346487e8130f614be3))
+
 ## [0.2.0](https://github.com/JoshMock/the-agency/compare/pi-observability-v0.1.0...pi-observability-v0.2.0) (2026-05-15)
 
 
