@@ -176,7 +176,7 @@ async function vmExec (vm: VM, cmd: string, { forwardStdout = true }: { forwardS
  */
 async function buildPiBundle (): Promise<Buffer> {
   const cacheDir = join(getConfig().stateDir, 'cache')
-  const registryUrl = 'https://registry.npmjs.org/@mariozechner%2Fpi-coding-agent'
+  const registryUrl = 'https://registry.npmjs.org/@earendil-works%2Fpi-coding-agent'
 
   info('Fetching pi package metadata...')
   const meta = await fetch(registryUrl).then(r => r.json()) as Record<string, any>
