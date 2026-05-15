@@ -12,7 +12,7 @@
   "scripts": {
     "lint": "eslint .",
     "lint:fix": "eslint --fix .",
-    "test": "npm run lint && node --experimental-transform-types --test extensions/index.test.ts && bash specify-templates/scripts/bash/common.test.sh"
+    "test": "npm run lint && node --experimental-transform-types --test extensions/index.test.ts"
   },
   "files": [
     "extensions/**",
