@@ -1,17 +1,131 @@
 /**
- * Tests for utilities extracted from the observability extension.
+ * Tests for utilities exported from the observability extension.
  */
 
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, afterEach, beforeEach } from 'node:test'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 
 import {
+  FileSpanExporter,
+  createTracerProvider,
   extractAssistantText,
   extractToolResults,
   inferSystem,
   stripSkillBlocks,
   stripUndefined,
 } from './index.ts'
+
+describe('createTracerProvider', () => {
+  let savedEndpoint: string | undefined
+  let savedTracesEndpoint: string | undefined
+
+  beforeEach(() => {
+    savedEndpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT']
+    savedTracesEndpoint = process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT']
+    delete process.env['OTEL_EXPORTER_OTLP_ENDPOINT']
+    delete process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT']
+  })
+
+  afterEach(() => {
+    if (savedEndpoint !== undefined) {
+      process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = savedEndpoint
+    } else {
+      delete process.env['OTEL_EXPORTER_OTLP_ENDPOINT']
+    }
+    if (savedTracesEndpoint !== undefined) {
+      process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'] = savedTracesEndpoint
+    } else {
+      delete process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT']
+    }
+  })
+
+  it('returns a file sink when no OTLP endpoint env var is set', () => {
+    const { provider, sinkLabel } = createTracerProvider()
+    assert.ok(provider != null)
+    assert.equal(sinkLabel, 'otlp:file')
+  })
+
+  it('returns an OTLP sink when OTEL_EXPORTER_OTLP_ENDPOINT is set', () => {
+    process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] = 'http://localhost:4318'
+    const { provider, sinkLabel } = createTracerProvider()
+    assert.ok(provider != null)
+    assert.equal(sinkLabel, 'otlp:localhost:4318')
+  })
+
+  it('returns an OTLP sink when OTEL_EXPORTER_OTLP_TRACES_ENDPOINT is set', () => {
+    process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT'] = 'http://collector:4318'
+    const { provider, sinkLabel } = createTracerProvider()
+    assert.ok(provider != null)
+    assert.equal(sinkLabel, 'otlp:collector:4318')
+  })
+})
+
+describe('FileSpanExporter', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-obs-test-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('writes spans as JSONL to a daily file', () => new Promise<void>((resolve) => {
+    const exporter = new FileSpanExporter(tmpDir)
+    const fakeSpan = makeFakeSpan('my-span', 'abc123traceId0000000000000000000', 'span0000id000001')
+
+    exporter.export([fakeSpan], (result) => {
+      assert.equal(result.code, 0)
+      const date = new Date().toISOString().slice(0, 10)
+      const file = path.join(tmpDir, `${date}.jsonl`)
+      const lines = fs.readFileSync(file, 'utf-8').trim().split('\n')
+      assert.equal(lines.length, 1)
+      const doc = JSON.parse(lines[0])
+      assert.equal(doc.name, 'my-span')
+      assert.equal(doc.traceId, 'abc123traceId0000000000000000000')
+      assert.equal(doc.spanId, 'span0000id000001')
+      assert.ok(typeof doc.startTimeMs === 'number')
+      assert.ok(typeof doc.endTimeMs === 'number')
+      assert.ok(doc.attributes != null)
+      resolve()
+    })
+  }))
+
+  it('appends multiple export calls to the same daily file', () => new Promise<void>((resolve) => {
+    const exporter = new FileSpanExporter(tmpDir)
+    const span1 = makeFakeSpan('span-one', 'trace1'.padEnd(32, '0'), 'spanid1'.padEnd(16, '0'))
+    const span2 = makeFakeSpan('span-two', 'trace2'.padEnd(32, '0'), 'spanid2'.padEnd(16, '0'))
+
+    exporter.export([span1], () => {
+      exporter.export([span2], (result) => {
+        assert.equal(result.code, 0)
+        const date = new Date().toISOString().slice(0, 10)
+        const file = path.join(tmpDir, `${date}.jsonl`)
+        const lines = fs.readFileSync(file, 'utf-8').trim().split('\n')
+        assert.equal(lines.length, 2)
+        assert.equal(JSON.parse(lines[0]).name, 'span-one')
+        assert.equal(JSON.parse(lines[1]).name, 'span-two')
+        resolve()
+      })
+    })
+  }))
+
+  it('creates the output directory if it does not exist', () => new Promise<void>((resolve) => {
+    const nested = path.join(tmpDir, 'deep', 'nested')
+    const exporter = new FileSpanExporter(nested)
+    const fakeSpan = makeFakeSpan('x', 'a'.repeat(32), 'b'.repeat(16))
+
+    exporter.export([fakeSpan], (result) => {
+      assert.equal(result.code, 0)
+      assert.ok(fs.existsSync(nested))
+      resolve()
+    })
+  }))
+})
 
 describe('stripSkillBlocks', () => {
   it('returns plain text unchanged', () => {
@@ -243,3 +357,25 @@ describe('extractToolResults', () => {
     assert.equal(extracted[0].output, '')
   })
 })
+
+function makeFakeSpan (name: string, traceId: string, spanId: string): Parameters<FileSpanExporter['export']>[0][number] {
+  return {
+    name,
+    kind: 0,
+    spanContext: () => ({ traceId, spanId, traceFlags: 1, isRemote: false }),
+    parentSpanContext: undefined,
+    startTime: [1700000000, 0] as [number, number],
+    endTime: [1700000001, 0] as [number, number],
+    duration: [1, 0] as [number, number],
+    status: { code: 0 },
+    attributes: { 'gen_ai.system': 'anthropic' },
+    links: [],
+    events: [],
+    ended: true,
+    resource: { attributes: {} } as unknown as Parameters<FileSpanExporter['export']>[0][number]['resource'],
+    instrumentationScope: { name: 'test' },
+    droppedAttributesCount: 0,
+    droppedEventsCount: 0,
+    droppedLinksCount: 0,
+  }
+}
