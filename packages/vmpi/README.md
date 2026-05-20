@@ -34,6 +34,13 @@ Running `pi` directly gives the agent access to your entire filesystem and unres
 
 For both macOS and Linux, [QEMU](https://www.qemu.org/) is required. Look for installation instructions appropriate to your environment.
 
+### Cross-Platform Compatibility
+
+vmpi is designed to work cross-platform, but with some platform-specific considerations:
+
+- **Linux**: Full functionality including automatic rootfs space management
+- **macOS/Windows**: Core sandboxing functionality works, but rootfs space management is limited due to lack of `qemu-img`, `dumpe2fs`, `e2fsck`, and `resize2fs` tools
+
 ## Install
 
 ```bash

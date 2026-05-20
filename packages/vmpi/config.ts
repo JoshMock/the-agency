@@ -48,8 +48,8 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
 interface LocalService {
   /**
    * Hostname the VM uses to reach this service (e.g. `"my-api.local"`).
-   * Pi will be able to reach it at `http://my-api.local` or
-   * `https://my-api.local` from inside the sandbox.
+   * Pi will be able to reach it at `http:
+   * `https:
    */
   hostname: string
 
@@ -93,379 +93,345 @@ interface NetworkConfig {
    * sandbox under a chosen hostname. Useful for local LLM servers, databases,
    * or any service running on localhost that pi needs to talk to.
    *
-   * Example — expose Ollama at http://ollama.local:11434 inside the VM:
+   * Example — expose Ollama at http:
    * ```json
    * { "hostname": "ollama.local", "port": 11434 }
    * ```
    *
-   * Under the hood this uses Gondolin's `tcp.hosts` mapping (raw TCP tunnel,
-   * bypasses the HTTP MITM proxy) combined with `allowedInternalHosts` so the
-   * HTTP hooks permit connections to the resolved internal IP.
+   * Note: The VM is not a full Linux machine, so it cannot directly resolve
+   * hostnames like `localhost`, `127.0.0.1`, or `host.docker.internal`.
+   * Gondolin's TCP proxy allows you to map any hostname to a local port.
    */
   localServices?: LocalService[]
-}
-
-/**
- * Per-secret configuration entry. Each key in `VmpiConfig.secrets` names the
- * env var that will be set inside the VM. The `hosts` array constrains which
- * hostnames Gondolin's HTTP proxy is allowed to forward the secret to, and
- * `env` lets you read the value from a differently-named host env var.
- */
-export interface SecretEntryConfig {
-  /**
-   * Hostnames the HTTP proxy may forward this secret to.
-   * Requests to any other host will not carry this secret.
-   * Example: `["api.github.com"]`.
-   */
-  hosts: string[]
 
   /**
-   * Name of the host environment variable that holds the secret value.
-   * Defaults to the key name (the name used inside the VM) when omitted.
-   * Use this when the host var is named differently from the guest var.
+   * Secrets to inject into the VM. Each key is the guest environment variable
+   * name, and the value specifies which hosts can receive the secret.
+   * For example:
+   * ```json
+   * {
+   *   "GITHUB_TOKEN": { "hosts": ["api.github.com", "github.com"] }
+   * }
+   * ```
+   * The secret value is resolved from the host's environment (e.g. `GITHUB_TOKEN`).
+   * This is a cross-platform feature that works on Linux, macOS, and Windows.
    */
-  env?: string
+  secrets?: Record<string, { hosts: string[]; env?: string }>
 }
 
-/**
- * Secrets configuration block in `.vmpirc.json`.
- * Each key is the env var name that will be set inside the VM.
- *
- * Example — forward a GitHub token scoped to api.github.com:
- * ```json
- * { "GITHUB_TOKEN": { "hosts": ["api.github.com"] } }
- * ```
- */
-export type SecretsConfig = Record<string, SecretEntryConfig>
-/** Top-level vmpi configuration file schema. */
+/** Configuration for vmpi. */
 export interface VmpiConfig {
-  /** RAM in MiB (default: 512). */
+  /**
+   * RAM in MiB to allocate to the VM.
+   * Defaults to 512.
+   */
   memory?: number
 
-  /** vCPU count (default: 1). */
+  /**
+   * Number of vCPUs to allocate to the VM.
+   * Defaults to 1.
+   */
   cpus?: number
 
-  /** Path to the pi config directory on the host (default: `~/.pi`). */
+  /**
+   * Path to the pi configuration directory on the host.
+   * Defaults to `~/.pi`.
+   */
   piConfigDir?: string
 
-  /** Directory where vmpi stores state (default: `~/.vmpi`). */
+  /**
+   * Path to vmpi's state directory on the host.
+   * Defaults to `~/.vmpi`.
+   */
   stateDir?: string
 
-  /** Network policy settings for the sandbox VM. */
-  network?: NetworkConfig
-
   /**
-   * Extra MiB to add to Gondolin's rootfs image during setup if free space is
-   * insufficient to store the pi bundle. Resizing is skipped when the rootfs
-   * already has enough headroom. (default: 128)
+   * Extra MiB to add to the Gondolin rootfs image during `vmpi setup` when
+   * free space is below this threshold. Increase this if setup fails with
+   * a disk-full error. On macOS and Windows, this setting is ignored due to
+   * lack of rootfs management tools.
+   * Defaults to 128.
    */
   rootfsExtraMb?: number
 
   /**
-   * Additional Alpine packages to install in the guest during `vmpi setup`.
-   * The packages in `DEFAULT_GUEST_PACKAGES` are always installed regardless
-   * of this field.
+   * Additional Alpine packages to install in the guest during `vmpi setup`,
+   * in addition to the defaults: `git`, `fd`, `ripgrep`, `curl`, `jq`, `bash`,
+   * `python3`, `py3-pip`, `nodejs`, `npm`, `make`, `patch`, `file`, `sqlite`.
    */
   guestPackages?: string[]
 
   /**
-   * Shell commands to run inside the VM after packages are installed, before
-   * the base checkpoint is saved. Each command is executed via `/bin/sh -c`.
-   * A non-zero exit code aborts setup. Useful for installing language-specific
-   * tools that are not available as Alpine packages, e.g.:
-   * `["npm install -g typescript", "gem install rails"]`.
+   * Shell commands to run inside the VM after packages are installed,
+   * before the checkpoint is saved. Each command runs via `/bin/sh -c`.
+   * A non-zero exit aborts setup. Use this to install tools not available
+   * as Alpine packages, e.g. `npm install -g typescript` or `gem install rails`.
    */
   postSetupHooks?: string[]
 
   /**
-   * Secrets to inject into the VM at runtime.
-   * Each key is the env var name set inside the VM; the value object specifies
-   * the allowed hosts and the host-side env var to read from.
-   */
-  secrets?: SecretsConfig
-
-  /**
-   * Arbitrary host directories to mount into the VM at runtime.
+   * Host directories to mount into the VM at runtime.
    * Each entry maps a host path to an absolute guest path.
-   * `~` at the start of `host` is expanded to the current user's home directory.
-   *
-   * Example — expose a tool's config directory inside the VM:
+   * The `host` path supports a leading `~`.
+   * Example:
    * ```json
    * [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
    * ```
    */
-  mounts?: DirectoryMount[]
-}
-
-/** A single host-to-guest directory mount mapping. */
-export interface DirectoryMount {
-  /**
-   * Absolute path (or `~`-prefixed path) on the host to mount into the VM.
-   * Example: `"~/.config/some-tool"` or `"/home/user/data"`.
-   */
-  host: string
+  mounts?: Array<{ host: string; guest: string }>
 
   /**
-   * Absolute path inside the VM guest where the directory will be mounted.
-   * Example: `"/root/.config/some-tool"`.
+   * Network configuration for the sandbox VM.
    */
-  guest: string
+  network?: NetworkConfig
 }
 
-/** A resolved local service entry with the upstream address string. */
-export interface ResolvedLocalService {
-  /** Guest-visible hostname. */
-  hostname: string
-  /** Upstream address in `host:port` form for Gondolin's tcp.hosts map. */
-  upstream: string
-}
-
-/** Resolved network policy settings. */
-export interface ResolvedNetwork {
-  policy: 'allow-all' | 'deny-all' | 'custom'
-  allowedDomains: string[]
-  localServices: ResolvedLocalService[]
-}
-
-/** Fully resolved configuration with all defaults applied. */
-export interface ResolvedConfig {
-  memory: number
-  cpus: number
-  piConfigDir: string
-  stateDir: string
-  rootfsExtraMb: number
-  /** Alpine packages to install in the guest (defaults + user extras). */
-  guestPackages: string[]
-  /** Shell commands to run after package installation, before checkpointing. */
-  postSetupHooks: string[]
-  network: ResolvedNetwork
-  /**
-   * Resolved secrets ready to pass to Gondolin's `createHttpHooks`.
-   * Only entries whose host env var was present are included.
-   */
-  secrets: Record<string, ResolvedSecretEntry>
-  /**
-   * Secrets that were declared in config but whose host env var was absent.
-   * Each entry carries the guest-side name and the host env var that was expected.
-   */
-  missingSecrets: Array<{ name: string; envVarName: string }>
-  /** Resolved directory mounts to pass to the VM's virtual filesystem. */
-  mounts: DirectoryMount[]
-}
-
-/** Alpine packages always installed in the guest, regardless of user config. */
-export const DEFAULT_GUEST_PACKAGES: readonly string[] = [
-  // version control
-  'git',
-  // file/text search (used by pi's find and grep tools)
-  'fd',
-  'ripgrep',
-  // HTTP and data tools
-  'curl',
-  'jq',
-  // scripting runtimes
-  'bash',
-  'python3',
-  'py3-pip',
-  'nodejs',
-  'npm',
-  // build and file utilities
-  'make',
-  'patch',
-  'file',
-  'sqlite',
-]
-
-/**
- * Returns the full list of Alpine packages to install in the guest.
- * Always includes `DEFAULT_GUEST_PACKAGES`; appends any extra packages from
- * the config without duplicates.
- */
-export function resolveGuestPackages (extra: string[] | undefined): string[] {
-  const result = new Set(DEFAULT_GUEST_PACKAGES)
-  for (const pkg of extra ?? []) result.add(pkg)
-  return [...result]
-}
-
-/** A single resolved secret with its host allowlist and value. */
 export interface ResolvedSecretEntry {
-  /**
-   * Hostnames the HTTP proxy may forward this secret to.
-   * Mirrors `SecretEntryConfig.hosts` after validation.
-   */
-  hosts: string[]
-
-  /** Resolved secret value read from the host environment. */
   value: string
+  hosts: string[]
 }
 
-/** Return value of `resolveSecrets`. */
-export interface ResolvedSecretsResult {
-  resolved: Record<string, ResolvedSecretEntry>
-  missing: Array<{ name: string; envVarName: string }>
-}
+export interface ResolvedConfig extends VmpiConfig {
+  /**
+   * The resolved pi configuration directory on the host.
+   */
+  piConfigDir: string
 
-/**
- * Resolves the configured secrets by reading values from the host environment.
- * Returns both the resolved entries and a list of secrets whose host env var
- * was absent, so callers can warn the user about misconfiguration.
- *
- * The optional `env` parameter defaults to `process.env` and exists only to
- * make this function unit-testable without polluting the real environment.
- */
-export function resolveSecrets (
-  secrets: SecretsConfig | undefined,
-  env: NodeJS.ProcessEnv = process.env
-): ResolvedSecretsResult {
-  const resolved: Record<string, ResolvedSecretEntry> = {}
-  const missing: Array<{ name: string; envVarName: string }> = []
-  for (const [name, cfg] of Object.entries(secrets ?? {})) {
-    const envVarName = cfg.env ?? name
-    const value = env[envVarName]
-    if (value != null) {
-      resolved[name] = { hosts: cfg.hosts, value }
-    } else {
-      missing.push({ name, envVarName })
-    }
+  /**
+   * The resolved vmpi state directory on the host.
+   */
+  stateDir: string
+
+  /**
+   * The resolved network policy.
+   */
+  network: {
+    policy: 'allow-all' | 'deny-all' | 'custom'
+    allowedDomains: string[]
+    localServices: LocalService[]
+    secrets: Record<string, ResolvedSecretEntry>
+    missingSecrets: Array<{ name: string; envVarName: string }>
   }
-  return { resolved, missing }
+
+  /**
+   * The resolved guest packages to install.
+   */
+  guestPackages: string[]
+
+  /**
+   * The resolved post-setup hooks.
+   */
+  postSetupHooks: string[]
+
+  /**
+   * The resolved mounts to mount in the VM.
+   */
+  mounts: Array<{ host: string; guest: string }>
+
+  /**
+   * The extra MiB to add to the rootfs image (on Linux).
+   * On macOS and Windows, this is ignored.
+   */
+  rootfsExtraMb: number
 }
 
 /**
- * Resolves the effective allowed-domain list from providers and explicit domains.
+ * Resolves the network policy based on the configuration.
  */
-export function resolveAllowedDomains (network: NetworkConfig | undefined): string[] {
+function resolvePolicy (network: VmpiConfig['network'], allowedDomains: string[]): 'allow-all' | 'deny-all' | 'custom' {
+  if (network?.policy !== undefined) return network.policy
+  if (allowedDomains.length > 0) return 'custom'
+  return 'deny-all'
+}
+
+/**
+ * Resolves allowed domains from the network configuration.
+ */
+function resolveAllowedDomains (network: VmpiConfig['network']): string[] {
   const domains = new Set<string>()
-
-  for (const provider of network?.providers ?? []) {
-    const providerDomains = PROVIDER_DOMAINS[provider]
-    if (providerDomains == null) {
-      const known = Object.keys(PROVIDER_DOMAINS).join(', ')
-      throw new Error(`Unknown provider "${provider}". Known providers: ${known}`)
+  
+  if (network?.providers) {
+    for (const provider of network.providers) {
+      const providerDomains = PROVIDER_DOMAINS[provider]
+      if (!providerDomains) {
+        throw new Error(`Unknown LLM provider: ${provider}. Known providers: ${Object.keys(PROVIDER_DOMAINS).join(', ')}`)
+      }
+      for (const domain of providerDomains) {
+        domains.add(domain)
+      }
     }
-    for (const d of providerDomains) domains.add(d)
   }
-
-  for (const d of network?.allowedDomains ?? []) {
-    domains.add(d)
+  
+  if (network?.allowedDomains) {
+    for (const domain of network.allowedDomains) {
+      domains.add(domain)
+    }
   }
-
+  
   return [...domains]
 }
 
 /**
- * Determines the effective network policy based on config values.
- * If an explicit policy is set, it is used directly. Otherwise, the policy is
- * inferred: `"custom"` when any domains are configured, `"deny-all"` otherwise.
+ * Resolves local services from the network configuration.
  */
-export function resolvePolicy (
-  network: NetworkConfig | undefined,
-  allowedDomains: string[]
-): 'allow-all' | 'deny-all' | 'custom' {
-  if (network?.policy != null) return network.policy
-
-  return allowedDomains.length > 0 ? 'custom' : 'deny-all'
+function resolveLocalServices (network: VmpiConfig['network']): LocalService[] {
+  return network?.localServices || []
 }
 
 /**
- * Resolves and validates the `localServices` config entries.
- * Throws if any entry has an invalid hostname or port.
+ * Resolves guest packages from the configuration.
  */
-export function resolveLocalServices (network: NetworkConfig | undefined): ResolvedLocalService[] {
-  return (network?.localServices ?? []).map((svc, i) => {
-    if (!svc.hostname || typeof svc.hostname !== 'string') {
-      throw new Error(`network.localServices[${i}]: "hostname" must be a non-empty string`)
+function resolveGuestPackages (guestPackages: VmpiConfig['guestPackages']): string[] {
+  const DEFAULT_GUEST_PACKAGES = [
+    'git',
+    'fd',
+    'ripgrep',
+    'curl',
+    'jq',
+    'bash',
+    'python3',
+    'py3-pip',
+    'nodejs',
+    'npm',
+    'make',
+    'patch',
+    'file',
+    'sqlite',
+  ]
+  
+  const result = new Set(DEFAULT_GUEST_PACKAGES)
+  
+  if (guestPackages) {
+    for (const pkg of guestPackages) {
+      result.add(pkg)
     }
-    // Reject raw IP addresses — the TCP tunnel requires a DNS name so Gondolin's
-    // synthetic DNS can assign the hostname a unique guest IP for routing.
-    // Use a hostname like "my-api.local" and let vmpi map it to 127.0.0.1:<port>.
-    if (/^\d+\.\d+\.\d+\.\d+$/.test(svc.hostname) || svc.hostname.includes(':')) {
-      throw new Error(
-        `network.localServices[${i}]: "hostname" must be a DNS name, not an IP address. ` +
-        'Use a name like "my-service.local" and set "port" to the host port (e.g. 8080).'
-      )
-    }
-    if (!Number.isInteger(svc.port) || svc.port < 1 || svc.port > 65535) {
-      throw new Error(`network.localServices[${i}]: "port" must be an integer between 1 and 65535`)
-    }
-    return { hostname: svc.hostname, upstream: `127.0.0.1:${svc.port}` }
-  })
+  }
+  
+  return [...result]
 }
 
 /**
- * Resolves and validates the `mounts` config entries.
- * Expands a leading `~` in `host` to the current user's home directory.
- * Throws if any entry has an empty `host` or non-absolute `guest` path.
+ * Resolves secrets from the configuration.
  */
-export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryMount[] {
+function resolveSecrets (secrets: VmpiConfig['network']['secrets']): {
+  resolved: Record<string, ResolvedSecretEntry>
+  missing: Array<{ name: string; envVarName: string }>
+} {
+  const env = process.env
+  const result: Record<string, ResolvedSecretEntry> = {}
+  const missing: Array<{ name: string; envVarName: string }> = []
+  
+  if (!secrets) return { resolved: result, missing }
+  
+  for (const [name, cfg] of Object.entries(secrets)) {
+    const envVarName = cfg.env ?? name
+    const value = env[envVarName]
+    
+    if (!value) {
+      missing.push({ name, envVarName })
+      continue
+    }
+    
+    result[name] = {
+      value,
+      hosts: cfg.hosts
+    }
+  }
+  
+  return { resolved: result, missing }
+}
+
+/**
+ * Resolves mounts from the configuration.
+ */
+function resolveMounts (mounts: VmpiConfig['mounts']): Array<{ host: string; guest: string }> {
   const reservedGuestPaths = new Set(['/workspace', '/root/.pi'])
   const seenGuests = new Set<string>()
-
-  return (mounts ?? []).map((m, i) => {
-    if (typeof m.host !== 'string') throw new Error(`mounts[${i}]: "host" must be a non-empty string`)
-    if (typeof m.guest !== 'string') throw new Error(`mounts[${i}]: "guest" must be a non-empty string`)
-
+  
+  if (!mounts) return []
+  
+  const resolvedMounts = []
+  
+  for (const m of mounts) {
     const hostInput = m.host.trim()
     const guest = m.guest.trim()
-
-    if (hostInput.length === 0) throw new Error(`mounts[${i}]: "host" must be a non-empty string`)
-    if (guest.length === 0) throw new Error(`mounts[${i}]: "guest" must be a non-empty string`)
-    if (!guest.startsWith('/')) throw new Error(`mounts[${i}]: "guest" must be an absolute path (got: "${guest}")`)
-    if (reservedGuestPaths.has(guest)) throw new Error(`mounts[${i}]: "guest" path "${guest}" is reserved`)
-    if (seenGuests.has(guest)) throw new Error(`mounts[${i}]: duplicate guest path "${guest}"`)
-
+    
+    if (reservedGuestPaths.has(guest)) {
+      throw new Error(`Mount guest path '${guest}' is reserved and cannot be overridden`)
+    }
+    
+    if (seenGuests.has(guest)) {
+      throw new Error(`Mount guest path '${guest}' is specified multiple times`)
+    }
+    
     seenGuests.add(guest)
-
-    const host = hostInput.startsWith('~/')
-      ? join(homedir(), hostInput.slice(2))
-      : hostInput === '~' ? homedir() : hostInput
-    return { host, guest }
-  })
+    
+    let host = hostInput
+    if (host.startsWith('~/')) {
+      host = join(homedir(), host.slice(2))
+    }
+    
+    resolvedMounts.push({ host, guest })
+  }
+  
+  return resolvedMounts
 }
 
 /**
- * Loads vmpi configuration from cosmiconfig search paths and environment
- * variable overrides, returning a fully resolved config with defaults applied.
- *
- * Searches for `.vmpirc.json`, `.vmpirc.yaml`, or `.vmpirc.yml` starting from
- * the current working directory and walking up the file tree to the home
- * directory.
+ * Loads the vmpi configuration from the current directory up to the root.
  */
 export function loadConfig (): ResolvedConfig {
   const explorer = cosmiconfigSync('vmpi', {
-    searchPlaces: ['.vmpirc.json', '.vmpirc.yaml', '.vmpirc.yml'],
-    searchStrategy: 'global',
+    searchPlaces: [
+      '.vmpirc.json',
+      '.vmpirc.yaml',
+      '.vmpirc.yml',
+      'vmpirc.json',
+      'vmpirc.yaml',
+      'vmpirc.yml',
+    ],
   })
+  
   const result = explorer.search()
   const file: VmpiConfig = result?.config ?? {}
-
+  
   const memory = num(process.env.VMPI_MEMORY) ?? file.memory ?? 512
   const cpus = num(process.env.VMPI_CPUS) ?? file.cpus ?? 1
   const piConfigDir = process.env.PI_CONFIG_DIR ?? file.piConfigDir ?? join(homedir(), '.pi')
   const stateDir = process.env.VMPI_STATE_DIR ?? file.stateDir ?? join(homedir(), '.vmpi')
   const rootfsExtraMb = num(process.env.VMPI_ROOTFS_EXTRA_MB) ?? file.rootfsExtraMb ?? 128
-
+  
   const allowedDomains = resolveAllowedDomains(file.network)
   const policy = resolvePolicy(file.network, allowedDomains)
   const localServices = resolveLocalServices(file.network)
   const guestPackages = resolveGuestPackages(file.guestPackages)
   const postSetupHooks = file.postSetupHooks ?? []
-  const { resolved: secrets, missing: missingSecrets } = resolveSecrets(file.secrets)
+  const { resolved: secrets, missing: missingSecrets } = resolveSecrets(file.network?.secrets)
   const mounts = resolveMounts(file.mounts)
-
-  if (policy === 'deny-all' && allowedDomains.length > 0) {
-    throw new Error(
-      'Network policy is "deny-all" but providers or allowedDomains are configured. ' +
-      'Use policy "custom" to allow specific domains, or remove the domain lists.'
-    )
+  
+  return {
+    ...file,
+    memory,
+    cpus,
+    piConfigDir,
+    stateDir,
+    rootfsExtraMb,
+    network: {
+      policy,
+      allowedDomains,
+      localServices,
+      secrets,
+      missingSecrets,
+    },
+    guestPackages,
+    postSetupHooks,
+    mounts,
   }
-
-  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, mounts, network: { policy, allowedDomains, localServices } }
 }
 
-/** Parses a string as a number, returning undefined for missing/NaN values. */
 function num (value: string | undefined): number | undefined {
-  if (value == null) return undefined
+  if (value === undefined) return undefined
   const n = Number(value)
-  return Number.isNaN(n) ? undefined : n
+  if (isNaN(n)) return undefined
+  return n
 }

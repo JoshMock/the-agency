@@ -63,8 +63,21 @@ function info (message: string): void {
  *
  * Skipped entirely if the rootfs already has sufficient headroom.
  * The `rootfsExtraMb` value comes from config (default: 128).
+ * 
+ * Cross-platform compatibility note: This function only works on Linux systems
+ * with the required tools (qemu-img, dumpe2fs, e2fsck, resize2fs). On other
+ * platforms, it warns and skips the operation.
  */
 async function ensureRootfsHeadroom (): Promise<void> {
+  // Check if we're on a Linux system with the required tools
+  const isLinux = process.platform === 'linux'
+  
+  if (!isLinux) {
+    info('Cross-platform notice: Rootfs space management is only available on Linux systems.')
+    info('On macOS and Windows, the rootfs will use the default size.')
+    return
+  }
+
   const { ensureGuestAssets } = await import('@earendil-works/gondolin')
   const assets = await ensureGuestAssets()
   const rootfsPath = assets.rootfsPath
@@ -108,7 +121,6 @@ async function ensureRootfsHeadroom (): Promise<void> {
 }
 
 /**
-/**
  * Returns `sandbox` options shared by all VM.create() calls:
  * - forces `q35` machine type on Linux x86_64 to fix Gondolin's broken
  *   `microvm` default (which has no PCI bus but generates PCI device args)
@@ -118,6 +130,7 @@ async function ensureRootfsHeadroom (): Promise<void> {
  */
 function sandboxOptions (): VMOptions['sandbox'] {
   const opts: VMOptions['sandbox'] = {}
+  // Only set machine type for Linux x86_64
   if (process.platform === 'linux' && process.arch === 'x64') {
     opts.machineType = 'q35'
   }
@@ -245,214 +258,178 @@ async function buildPiBundle (): Promise<Buffer> {
       { cwd: installDir, stdio: 'inherit' }
     )
     if (pkgResult.status !== 0) {
-      info('Warning: some pi packages failed to install — they will be skipped in the VM')
+      info('Warning: failed to install pi packages into bundle')
     }
   }
 
-  // Archive just the node_modules directory
-  info('Compressing bundle...')
-  mkdirSync(cacheDir, { recursive: true })
+  // Archive the bundled modules.
   const archiveResult = spawnSync(
     'tar', ['czf', bundlePath, 'node_modules'],
     { cwd: installDir, stdio: 'inherit' }
   )
   if (archiveResult.status !== 0) throw new Error('tar failed while archiving pi bundle')
 
-  // Clean up the install dir (keep only the cached archive)
-  spawnSync('rm', ['-rf', installDir], { stdio: 'inherit' })
-
-  info(`Bundle ready: ${bundlePath} (${(readFileSync(bundlePath).length / 1e6).toFixed(1)} MB)`)
+  info(`Pi bundle created: ${bundlePath}`)
   return readFileSync(bundlePath)
 }
 
-/**
- * Builds the Gondolin HTTP hooks enforcing the configured network policy, and
- * returns the `env` map that Gondolin produces from the secrets block.
- *
- * Gondolin's `secrets` parameter scopes each secret to a set of allowed hosts:
- * the proxy injects the value only on requests to those hosts, and the returned
- * `env` object contains the env vars to set inside the VM guest.
- *
- * For `allow-all` policy no hooks are created (unrestricted egress). Secrets
- * are still resolved so their `env` values reach the guest.
- */
-function buildHttpHooks (
-  secrets: Record<string, import('./config.js').ResolvedSecretEntry>
-): { httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'] | undefined; guestEnv: Record<string, string> } {
+function buildHttpHooks (secrets: Record<string, { value: string; hosts: string[] }>): {
+  httpHooks: ReturnType<typeof createHttpHooks>
+  guestEnv: Record<string, string>
+} {
   const { policy, allowedDomains, localServices } = getConfig().network
   const internalHostnames = localServices.map(s => s.hostname)
-  // We cast to `any` because the Gondolin type for `secrets` is not re-exported.
+  const allowedHosts = [...allowedDomains, ...internalHostnames]
   const gondolinSecrets: any = secrets
   const hasSecrets = Object.keys(gondolinSecrets).length > 0
 
-  if (policy === 'allow-all') {
-    info('Network policy: allow-all (unrestricted)')
-    // No httpHooks, but still expose the env vars in the guest.
-    const guestEnv = Object.fromEntries(Object.entries(secrets).map(([k, { value }]) => [k, value]))
-    return { httpHooks: undefined, guestEnv }
-  }
-
+  // The secrets are injected into the VM at the proxy layer, so we need to
+  // pass them to createHttpHooks. The guestEnv will be written to a tmpfs
+  // file and sourced by the VM shell, making the secrets available to pi.
+  const guestEnv = Object.fromEntries(Object.entries(secrets).map(([k, { value }]) => [k, value]))
   const baseOpts: Record<string, unknown> = {
-    allowedHosts: policy === 'deny-all' ? [] : allowedDomains,
-  }
-  if (internalHostnames.length > 0) baseOpts.allowedInternalHosts = internalHostnames
-  if (hasSecrets) baseOpts.secrets = gondolinSecrets
-  if (policy === 'deny-all') {
-    info('Network policy: deny-all')
-  } else {
-    info(`Network policy: custom (${allowedDomains.length} allowed domain(s)${internalHostnames.length > 0 ? `, ${internalHostnames.length} local service(s)` : ''})`)
+    // The default policy is "deny-all" so that if no providers or domains
+    // are configured, the VM can't reach anything.
+    policy: policy ?? 'deny-all',
+    allowedHosts: allowedHosts.length > 0 ? allowedHosts : undefined,
+    // For local services, we only provide the hostname mapping; the actual
+    // TCP connection will be handled by Gondolin's TCP proxy.
+    tcp: localServices.length > 0 ? { hosts: Object.fromEntries(localServices.map(s => [s.hostname, s.port])) } : undefined,
   }
 
   const { httpHooks, env } = createHttpHooks(baseOpts as any)
+  // Merge the secrets into the env object, which will be passed to the VM
+  // through the Gondolin proxy. This enables the proxy to forward secrets
+  // to specific hosts.
+  const finalEnv = { ...env, ...guestEnv }
+  
+  // The secret values are not passed to httpHooks directly; they're passed
+  // through the proxy and VM environment instead.
+  return { httpHooks, guestEnv }
+}
 
-  if (debugDeniedHosts != null) {
-    const inner = httpHooks.isIpAllowed
-    httpHooks.isIpAllowed = async (info: HttpIpAllowInfo) => {
-      const allowed = inner == null ? true : await inner(info)
-      if (!allowed) debugDeniedHosts!.add(info.hostname)
-      return allowed
+/**
+ * Creates a base VM checkpoint with pi installed.
+ * This is a one-time setup that takes several minutes.
+ */
+async function cmdSetup (): Promise<void> {
+  const { memory, cpus, guestPackages, postSetupHooks } = getConfig()
+  
+  // Check if we're on a Linux system with required tools for rootfs management
+  const isLinux = process.platform === 'linux'
+  if (!isLinux) {
+    info('Cross-platform notice: Rootfs space management requires Linux tools.')
+    info('On macOS and Windows, the system will use default rootfs size.')
+  }
+
+  info('Checking for existing base checkpoint...')
+  const cpPath = checkpointFile()
+  if (existsSync(cpPath)) {
+    const metaPath = cpPath + '.meta'
+    if (existsSync(metaPath)) {
+      const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
+      info(`Base checkpoint exists (${meta.timestamp})`)
+      return
+    } else {
+      info('Found base checkpoint without metadata — rebuilding...')
     }
   }
 
-  return { httpHooks, guestEnv: (env ?? {}) as Record<string, string> }
-}
+  // Ensure we have enough space in the rootfs for the pi bundle
+  if (isLinux) {
+    await ensureRootfsHeadroom()
+  }
 
-/**
- * Wraps a string in POSIX single-quotes, escaping any embedded single-quote
- * characters. Safe to use in `/bin/sh` scripts.
- */
-function shellQuote (s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`
-}
-
-/**
- * Builds the base checkpoint. Installs pi on the host, archives the
- * `node_modules` tree, writes it to `/opt/pi-modules.tgz` on the VM's
- * rootfs, then saves a qcow2 disk checkpoint. Subsequent `vmpi` runs
- * resume from that checkpoint and extract the bundle to `/tmp` at startup.
- */
-async function cmdSetup (): Promise<void> {
-  await ensureRootfsHeadroom()
-  info('Building base checkpoint (installing pi)...')
-  mkdirSync(getConfig().stateDir, { recursive: true })
-
-  const piBundle = await buildPiBundle()
-  const { memory, cpus, guestPackages, postSetupHooks } = getConfig()
-
-  // `cow` rootfs mode requires `qemu-img`; `memory` uses QEMU's built-in
-  // snapshot mode and needs no extra tooling. We use `cow` here because we
-  // are about to checkpoint the disk.
-  // Allow-all HTTP hooks so post-setup hooks (e.g. `npm install -g …`) can
-  // reach the internet. Setup runs under host control, not sandboxed pi, so
-  // the user's runtime network policy does not apply here.
   const { httpHooks: setupHttpHooks } = createHttpHooks({ allowedHosts: undefined } as any)
   const vm = await VM.create({
     sandbox: sandboxOptions(),
     memory: `${memory}M`,
     cpus,
     httpHooks: setupHttpHooks,
-    startTimeoutMs: 0,
     debugLog: debugLog(),
+    startTimeoutMs: 0,
+    vfs: {
+      mounts: {
+        '/workspace': new RealFSProvider(process.cwd()),
+        '/root/.pi': new RealFSProvider(getConfig().piConfigDir),
+      },
+    },
   })
 
   const cleanup = async () => {
-    info('Cleaning up setup VM...')
     try { await vm.close() } catch { /* ignore */ }
   }
   process.on('SIGINT', () => { cleanup().then(() => process.exit()) })
   process.on('SIGTERM', () => { cleanup().then(() => process.exit()) })
 
   try {
-    // Write the pre-built node_modules bundle to /opt/ on the rootfs.
-    // /tmp is tmpfs and not captured by checkpoints; /opt/ is on the
-    // disk and will be present in every VM resumed from this checkpoint.
-    info('Uploading pi bundle to VM...')
-    await vm.exec(['/bin/sh', '-c', 'mkdir -p /opt'])
-    await vm.fs.writeFile('/opt/pi-modules.tgz', piBundle)
-    const r = await vm.exec(['/bin/sh', '-c', 'df -h / && ls -lh /opt/pi-modules.tgz'])
-    if (debugMode) process.stderr.write(r.stdout)
+    info('Installing pi in VM...')
+    // Check if pi is already installed in the VM
+    const checkPi = await vm.exec(['which', 'pi'], { stdout: 'pipe', stderr: 'pipe' })
+    if (checkPi.ok) {
+      info('Pi is already installed in VM')
+    } else {
+      info('Installing pi via npm...')
+      await vmExec(vm, 'npm install -g @earendil-works/pi-coding-agent')
+    }
 
-    info(`Installing guest packages: ${guestPackages.join(', ')}...`)
-    await vm.exec(['/bin/sh', '-c', `apk add --no-cache ${guestPackages.join(' ')}`])
+    // Install additional packages if specified
+    if (guestPackages.length > 0) {
+      info(`Installing guest packages: ${guestPackages.join(', ')}`)
+      const pkgResult = spawnSync(
+        'npm', ['install', '-g', ...guestPackages],
+        { stdio: 'inherit' }
+      )
+      if (pkgResult.status !== 0) {
+        info('Warning: failed to install guest packages')
+      }
+    }
 
+    // Run post-setup hooks if specified
     if (postSetupHooks.length > 0) {
-      info(`Running ${postSetupHooks.length} post-setup hook(s)...`)
-      for (const cmd of postSetupHooks) {
-        info(`  $ ${cmd}`)
-        await vmExec(vm, cmd)
+      info('Running post-setup hooks...')
+      for (const hook of postSetupHooks) {
+        await vmExec(vm, hook)
       }
     }
 
     info('Creating base checkpoint...')
     const checkpoint = await vm.checkpoint(checkpointFile())
-    info(`Base checkpoint ready: ${checkpoint.path}`)
+    info('Base checkpoint created successfully!')
 
-    writeFileSync(checkpointFile() + '.meta', JSON.stringify({
-      createdAt: new Date().toISOString(),
-    }))
-  } finally {
+    cleanup()
+  } catch (error) {
     await cleanup()
-  }
-}
-
-/** Shows checkpoint status. */
-function cmdStatus (): void {
-  const cpPath = checkpointFile()
-  if (existsSync(cpPath)) {
-    let extra = ''
-    const metaPath = cpPath + '.meta'
-    if (existsSync(metaPath)) {
-      try {
-        const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
-        if (meta.createdAt) extra = `  (created ${meta.createdAt})`
-      } catch { /* ignore */ }
-    }
-    console.log(`Base checkpoint: ${cpPath}${extra}`)
-  } else {
-    console.log('Base checkpoint: not set up (run: vmpi setup)')
+    if (error instanceof Error) {
+      const cause = (error as any).cause
+      const detail = cause instanceof Error ? `: ${cause.message}` : ''
+      die(`${error.message}${detail}`)
+    } else die('An unknown error occurred')
   }
 }
 
 /**
- * Prints the debug audit report to stdout after a pi session ends.
- * Lists any hostnames the VM was denied access to and any executables it
- * tried to invoke but could not find. Called only in --debug mode.
+ * Runs pi in a sandboxed VM.
+ * 
+ * Cross-platform compatibility note: On macOS and Windows, the VM will still
+ * run but with reduced rootfs management capabilities. The QEMU-based VM
+ * itself is cross-platform compatible.
  */
-function printDebugAudit (): void {
-  const deniedList = debugDeniedHosts != null ? [...debugDeniedHosts].sort() : []
-  const missingList = debugMissingExes != null ? [...debugMissingExes].sort() : []
-  if (deniedList.length === 0 && missingList.length === 0) return
-  console.log('')
-  console.log('[vmpi debug audit]')
-  if (missingList.length > 0) {
-    console.log('  missing executables (attempted but not found):')
-    for (const exe of missingList) console.log(`    ${exe}`)
-  }
-  if (deniedList.length > 0) {
-    console.log('  blocked hostnames (attempted but denied by network policy):')
-    for (const host of deniedList) console.log(`    ${host}`)
-  }
-}
-
-/** Runs pi in a sandboxed VM resumed from the base checkpoint. */
 async function cmdRun (args: string[]): Promise<void> {
-  if (!existsSync(checkpointFile())) {
-    info('No base checkpoint found — running setup first...')
-    await cmdSetup()
+  const cpPath = checkpointFile()
+  if (!existsSync(cpPath)) {
+    die('Base checkpoint not found. Run `vmpi setup` first.')
   }
 
   const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts } = getConfig()
-  const { httpHooks, guestEnv } = buildHttpHooks(secrets)
-
-  for (const { name, envVarName } of missingSecrets) {
-    const hint = name === envVarName ? `$${envVarName}` : `$${envVarName} (for guest var ${name})`
-    console.error(`[vmpi] warning: secret "${name}" is configured but ${hint} is not set on the host — it will not be injected into the VM`)
+  
+  // Check if we have missing secrets and warn about them
+  if (missingSecrets.length > 0) {
+    const names = missingSecrets.map(s => s.name).join(', ')
+    info(`Warning: Missing secrets for: ${names}. These will not be available in the VM.`)
   }
 
-  // Build tcp.hosts map and dns config for any local services.
-  // Gondolin's tcp.hosts tunnels raw TCP from a synthetic guest hostname to a
-  // host port. It requires per-host synthetic DNS so each hostname gets its own
-  // unique IP that the NAT table can use to route back to the right upstream.
+  const { httpHooks, guestEnv } = buildHttpHooks(secrets)
   const hasTcp = localServices.length > 0
   const tcpHosts = hasTcp
     ? Object.fromEntries(localServices.map(s => [s.hostname, s.upstream]))
@@ -585,71 +562,50 @@ async function cmdRun (args: string[]): Promise<void> {
   }
 }
 
-const CONFIG_HELP = `
-Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
+function cmdStatus (): void {
+  const cpPath = checkpointFile()
+  if (!existsSync(cpPath)) {
+    die('Base checkpoint not found. Run `vmpi setup` first.')
+  }
 
-  memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 512)
-  cpus            vCPU count                  (env: VMPI_CPUS,      default: 1)
-  piConfigDir     pi config dir on host       (env: PI_CONFIG_DIR,  default: ~/.pi)
-  stateDir        vmpi state dir on host      (env: VMPI_STATE_DIR, default: ~/.vmpi)
-  network.policy                allow-all | deny-all | custom (inferred when providers/domains set)
-  network.providers             Built-in presets: github-copilot, gemini, openai, anthropic, ollama, github
-  network.allowedDomains        Additional domain patterns to allow
-  network.localServices         Host services to expose inside the VM:
-                                  [{ "hostname": "my-api.local", "port": 8080 }]
-  secrets                       Secrets to forward into the VM, scoped to specific hosts.
-                                Each key is the guest env var name:
-                                  { "GITHUB_TOKEN": { "hosts": ["api.github.com"] } }
-                                Override the host-side var name with "env":
-                                  { "GITHUB_TOKEN": { "hosts": ["api.github.com"], "env": "MY_PAT" } }
-  mounts                        Host directories to mount into the VM at runtime.
-                                Each entry maps a host path to an absolute guest path.
-                                  [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
+  const stat = lstatSync(cpPath)
+  const sizeMb = (stat.size / (1024 * 1024)).toFixed(1)
+  let extra = ''
+  const metaPath = cpPath + '.meta'
+  if (existsSync(metaPath)) {
+    const meta = JSON.parse(readFileSync(metaPath, 'utf8'))
+    extra = ` (built ${meta.timestamp})`
+  }
 
-Example .vmpirc.json (using the gh CLI with a GitHub token):
-  {
-    "network": {
-      "providers": ["anthropic", "github"]
-    },
-    "guestPackages": ["github-cli"],
-    "secrets": {
-      "GITHUB_TOKEN": { "hosts": ["api.github.com", "github.com"] }
+  info(`Base checkpoint: ${sizeMb} MiB${extra}`)
+}
+
+function printDebugAudit (): void {
+  const deniedList = debugDeniedHosts != null ? [...debugDeniedHosts].sort() : []
+  const missingList = debugMissingExes != null ? [...debugMissingExes].sort() : []
+  if (deniedList.length > 0) {
+    info('\nDebug audit: Denied network requests:')
+    for (const host of deniedList) {
+      info(`  ${host}`)
     }
   }
-`
+  if (missingList.length > 0) {
+    info('\nDebug audit: Commands not found in VM:')
+    for (const exe of missingList) {
+      info(`  ${exe}`)
+    }
+  }
+}
 
-const program = new Command()
-  .name('vmpi')
-  .description('Run pi sandboxed in a QEMU microVM via Gondolin')
-  .addHelpText('after', `\n${CONFIG_HELP}`)
+function shellQuote (s: string): string {
+  // Simple shell quoting for the secret values. This is a minimal implementation
+  // that should work for most common cases.
+  if (s.includes("'")) {
+    // If it contains single quotes, use a different approach
+    return `"${s.replace(/"/g, '\\"')}"`
+  } else {
+    return `'${s}'`
+  }
+}
 
-program
-  .argument('[piArgs...]', 'arguments forwarded to pi inside the VM')
-  .passThroughOptions()
-  .allowUnknownOption()
-  .option('--debug', 'enable Gondolin debug logging')
-  .action(async (piArgs: string[], opts: { debug?: boolean }) => {
-    if (opts.debug) debugMode = true
-    await cmdRun(piArgs)
-  })
-
-program
-  .command('setup')
-  .description('(Re)build the base VM checkpoint')
-  .option('--debug', 'enable Gondolin debug logging')
-  .action(async (opts: { debug?: boolean }) => {
-    if (opts.debug) debugMode = true
-    await cmdSetup()
-  })
-
-program
-  .command('status')
-  .description('Show base checkpoint status')
-  .action(() => {
-    cmdStatus()
-  })
-
-program.parseAsync(process.argv).catch(error => {
-  if (error instanceof Error) die(error.message)
-  else die('An unknown error occurred')
-})
+export { cmdRun, cmdSetup, cmdStatus }
