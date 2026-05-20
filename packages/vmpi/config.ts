@@ -36,7 +36,7 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
     '*.githubusercontent.com',
   ],
   openrouter: [
-    'api.openrouter.ai'
+    'openrouter.ai'
   ],
   'llama.cpp': [
     'localhost',
