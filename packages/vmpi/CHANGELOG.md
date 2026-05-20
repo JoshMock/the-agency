@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.0...vmpi-v0.4.1) (2026-05-20)
+
+
+### Bug Fixes
+
+* correct OpenRouter hostname ([3f5225b](https://github.com/JoshMock/the-agency/commit/3f5225bfc22966f90f2393f4470686ddf94bdc05))
+
 ## [0.4.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.3.0...vmpi-v0.4.0) (2026-05-15)
 
 
