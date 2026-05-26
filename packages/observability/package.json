@@ -1,6 +1,6 @@
 {
   "name": "@the-agency/pi-observability",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Record tool usage, tokens, models, skills, and sessions as OpenTelemetry GenAI spans.",
   "type": "module",
   "main": "index.ts",

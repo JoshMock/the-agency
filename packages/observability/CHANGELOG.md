@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JoshMock/the-agency/compare/pi-observability-v0.2.1...pi-observability-v0.3.0) (2026-05-26)
+
+
+### Features
+
+* support OTLP sink via env vars ([#90](https://github.com/JoshMock/the-agency/issues/90)) ([dd3f979](https://github.com/JoshMock/the-agency/commit/dd3f97909dd0170748c303eb4bd23e3f7331499c))
+
 ## [0.2.1](https://github.com/JoshMock/the-agency/compare/pi-observability-v0.2.0...pi-observability-v0.2.1) (2026-05-15)
 
 
