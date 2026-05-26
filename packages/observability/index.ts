@@ -1,22 +1,19 @@
 /**
  * Pi Observability Extension
  *
- * Emits one OTel GenAI-compatible JSONL document per assistant turn, matching
- * the schema produced by pi-sessions-to-otel.ts so both sources index into the
- * same Elasticsearch index without mapping conflicts.
+ * Emits one OTel GenAI-compatible span per assistant turn. Spans are exported
+ * via OTLP when a collector endpoint is configured, or written to JSONL files
+ * under ~/.pi/observability/ when no endpoint is set.
  *
- * Additional fields captured at runtime that the offline ETL cannot provide:
- *   - pi.session.skills          – names of every skill loaded at prompt time
- *   - pi.session.skill_paths     – filesystem paths of loaded skills
- *   - pi.session.tools           – names of all active tools
- *   - pi.session.tool_sources    – source metadata (builtin / extension / sdk)
- *   - pi.session.commands        – slash commands registered at prompt time
- *   - pi.turn.exchange_id        – stable ID grouping one user prompt + all its
- *                                  assistant turns (set on before_agent_start,
- *                                  shared across every turn in that exchange)
- *   - pi.response_id             – provider response ID (used as ES _id)
+ * Standard OpenTelemetry environment variables:
  *
- * Output goes to a configurable sink (handled separately).
+ *   OTEL_EXPORTER_OTLP_ENDPOINT  - OTLP collector URL (enables OTLP export)
+ *   OTEL_EXPORTER_OTLP_HEADERS   - comma-separated key=value auth headers
+ *   OTEL_EXPORTER_OTLP_PROTOCOL  - http/json (default), http/protobuf, grpc
+ *   OTEL_SERVICE_NAME             - overrides the default service name
+ *
+ * When no OTLP endpoint is set, spans are written to
+ * ~/.pi/observability/YYYY-MM-DD.jsonl (one file per day, one span per line).
  *
  * Semantic conventions: https://opentelemetry.io/docs/specs/semconv/gen-ai/
  */
@@ -31,11 +28,19 @@ import type {
   Skill,
   ToolInfo,
 } from '@mariozechner/pi-coding-agent'
+import type { ExportResult, Tracer } from '@opentelemetry/api'
+import { ROOT_CONTEXT, TraceFlags, trace } from '@opentelemetry/api'
+import { ExportResultCode } from '@opentelemetry/core'
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http'
+import { resourceFromAttributes } from '@opentelemetry/resources'
+import type { ReadableSpan, SpanExporter } from '@opentelemetry/sdk-trace-base'
+import { BasicTracerProvider, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base'
 import * as crypto from 'node:crypto'
+import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-/** Extracted tool call for the span document. */
+/** Extracted tool call for the span. */
 interface SpanToolCall {
   id: string
   name: string
@@ -43,7 +48,7 @@ interface SpanToolCall {
   arguments_text: string
 }
 
-/** Extracted tool result for the span document. */
+/** Extracted tool result for the span. */
 interface SpanToolResult {
   tool_call_id: string
   tool_name: string
@@ -57,7 +62,7 @@ interface ExtractedAssistantContent {
   toolCalls: SpanToolCall[]
 }
 
-/** Metadata about a loaded skill, trimmed for ES storage. */
+/** Metadata about a loaded skill. */
 interface SkillMeta {
   name: string
   path: string
@@ -65,27 +70,12 @@ interface SkillMeta {
   scope: string
 }
 
-/** Metadata about an active tool, trimmed for ES storage. */
+/** Metadata about an active tool. */
 interface ToolMeta {
   name: string
   source: string
   scope: string
 }
-
-/**
- * One OTel GenAI span document, emitted per assistant turn.
- * Schema matches pi-sessions-to-otel.ts output exactly for fields shared
- * between both sources.
- */
-interface SpanDocument {
-  [key: string]: unknown
-  '@timestamp': string
-  'span.id': string
-  'trace.id': string
-  'span.name': string
-}
-
-// ─── Provider → gen_ai.system mapping ────────────────────────────────────────
 
 const PROVIDER_TO_SYSTEM: Record<string, string> = {
   anthropic: 'anthropic',
@@ -116,11 +106,8 @@ export function inferSystem (provider: string, model: string): string {
   return provider || 'unknown'
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
 /**
- * Extract text blocks from an assistant message, returning the joined text
- * and thinking content as separate strings.
+ * Extract text, thinking, and tool call blocks from an assistant message.
  */
 export function extractAssistantText (msg: AssistantMessage): ExtractedAssistantContent {
   const textParts: string[] = []
@@ -153,8 +140,7 @@ export function extractAssistantText (msg: AssistantMessage): ExtractedAssistant
 }
 
 /**
- * Extract text output from tool result messages that belong to a given set of
- * tool call IDs.
+ * Extract text output from tool result messages.
  */
 export function extractToolResults (
   toolResults: ToolResultMessage[]
@@ -177,8 +163,6 @@ export function extractToolResults (
 
 /**
  * Build trimmed skill metadata from the systemPromptOptions skills array.
- * Skills with disableModelInvocation are excluded from the system prompt but
- * we include them here for observability completeness.
  */
 function buildSkillMeta (skills: Skill[] | undefined): SkillMeta[] {
   if (skills == null || skills.length === 0) return []
@@ -206,12 +190,167 @@ export function stripUndefined (obj: Record<string, unknown>): void {
   }
 }
 
-// ─── Extension ────────────────────────────────────────────────────────────────
+/**
+ * Span exporter that appends one JSON line per span to a daily file under
+ * a configurable directory (default: ~/.pi/observability/).
+ * The file for each day is named YYYY-MM-DD.jsonl.
+ */
+export class FileSpanExporter implements SpanExporter {
+  /** Absolute path to the directory where JSONL files are written. */
+  readonly dir: string
+
+  constructor (dir?: string) {
+    this.dir = dir ?? path.join(os.homedir(), '.pi', 'observability')
+  }
+
+  /**
+   * Append each span as a JSON line to today's JSONL file.
+   * Creates the directory if it does not exist.
+   */
+  export (spans: ReadableSpan[], resultCallback: (result: ExportResult) => void): void {
+    const date = new Date().toISOString().slice(0, 10)
+    const file = path.join(this.dir, `${date}.jsonl`)
+    const lines = spans.map((span) => JSON.stringify(serializeSpan(span))).join('\n') + '\n'
+
+    fs.mkdir(this.dir, { recursive: true }, (mkdirErr) => {
+      if (mkdirErr) {
+        resultCallback({ code: ExportResultCode.FAILED, error: mkdirErr })
+        return
+      }
+      fs.appendFile(file, lines, (appendErr) => {
+        if (appendErr) {
+          resultCallback({ code: ExportResultCode.FAILED, error: appendErr })
+        } else {
+          resultCallback({ code: ExportResultCode.SUCCESS })
+        }
+      })
+    })
+  }
+
+  /** No-op: file writes are fire-and-forget. */
+  shutdown (): Promise<void> {
+    return Promise.resolve()
+  }
+}
+
+/**
+ * Serialize a ReadableSpan to a plain JSON-serialisable object.
+ * HrTime values are converted to milliseconds since Unix epoch.
+ */
+function serializeSpan (span: ReadableSpan): Record<string, unknown> {
+  const ctx = span.spanContext()
+  return {
+    traceId: ctx.traceId,
+    spanId: ctx.spanId,
+    parentSpanId: span.parentSpanContext?.spanId,
+    name: span.name,
+    startTimeMs: hrTimeToMs(span.startTime),
+    endTimeMs: hrTimeToMs(span.endTime),
+    attributes: span.attributes,
+    status: span.status,
+  }
+}
+
+/** Convert an OTel HrTime ([seconds, nanoseconds]) to milliseconds. */
+function hrTimeToMs (hrTime: [number, number]): number {
+  return hrTime[0] * 1000 + hrTime[1] / 1e6
+}
+
+/** Return value of createTracerProvider. */
+export interface TracerProviderResult {
+  provider: BasicTracerProvider
+  sinkLabel: string
+}
+
+/**
+ * Initialise a tracer provider.
+ *
+ * When OTEL_EXPORTER_OTLP_ENDPOINT (or OTEL_EXPORTER_OTLP_TRACES_ENDPOINT) is
+ * set, an OTLPTraceExporter is used and spans are sent to that collector.
+ * Otherwise a FileSpanExporter is used and spans are written to daily JSONL
+ * files under ~/.pi/observability/.
+ *
+ * Returns an object containing the provider and a short label describing the
+ * active sink ("otlp:<host>" or "otlp:file").
+ */
+export function createTracerProvider (): TracerProviderResult {
+  const endpoint =
+    process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ??
+    process.env['OTEL_EXPORTER_OTLP_TRACES_ENDPOINT']
+
+  let exporter: SpanExporter
+  let sinkLabel: string
+
+  if (endpoint) {
+    exporter = new OTLPTraceExporter()
+    sinkLabel = `otlp:${new URL(endpoint).host}`
+  } else {
+    exporter = new FileSpanExporter()
+    sinkLabel = 'otlp:file'
+  }
+
+  const provider = new BasicTracerProvider({
+    resource: resourceFromAttributes({
+      'service.name': process.env['OTEL_SERVICE_NAME'] ?? 'pi-coding-agent',
+      'telemetry.sdk.name': 'pi-observability-extension',
+    }),
+    spanProcessors: [new SimpleSpanProcessor(exporter)],
+  })
+
+  return { provider, sinkLabel }
+}
+
+/**
+ * Emit one OTel span for a completed assistant turn.
+ *
+ * All Gen AI attributes, message content, tool calls/results, session metadata,
+ * and cost fields are set as span attributes. Complex values (arrays of objects)
+ * are JSON-serialised. The session ID is used as the OTel trace ID so all turns
+ * in one session share a trace.
+ */
+function emitSpan (
+  tracer: Tracer,
+  spanName: string,
+  traceId: string,
+  rootSpanId: string,
+  startTimeMs: number,
+  endTimeMs: number,
+  attributes: Record<string, unknown>
+): void {
+  const normalizedTraceId = traceId.replace(/-/g, '').padEnd(32, '0').slice(0, 32)
+  const parentCtx = trace.setSpanContext(ROOT_CONTEXT, {
+    traceId: normalizedTraceId,
+    spanId: rootSpanId,
+    traceFlags: TraceFlags.SAMPLED,
+    isRemote: true,
+  })
+
+  const span = tracer.startSpan(spanName, { startTime: startTimeMs }, parentCtx)
+
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value == null) continue
+    if (
+      typeof value === 'string' ||
+      typeof value === 'number' ||
+      typeof value === 'boolean'
+    ) {
+      span.setAttribute(key, value)
+    } else if (Array.isArray(value) && value.every((v) => typeof v === 'string')) {
+      span.setAttribute(key, value as string[])
+    } else {
+      span.setAttribute(key, JSON.stringify(value))
+    }
+  }
+
+  span.end(endTimeMs)
+}
 
 export default function (pi: ExtensionAPI) {
-  // ── Session-level state ──────────────────────────────────────────────────
+  const { provider: tracerProvider, sinkLabel } = createTracerProvider()
+  const tracer = tracerProvider.getTracer('pi-observability-extension')
 
   let sessionId: string | undefined
+  let sessionRootSpanId = crypto.randomBytes(8).toString('hex')
   let sessionFile: string | null = null
   let sessionStartTs: string | undefined
   let cwd = process.cwd()
@@ -219,8 +358,6 @@ export default function (pi: ExtensionAPI) {
   let currentProvider: string | undefined
   let currentThinkingLevel: string | undefined
 
-  // snapshot of skills + tools captured at before_agent_start, held until
-  // the turn produces a span document to attach them to
   let currentExchangeId: string | undefined
   let currentExchangeSkills: SkillMeta[] = []
   let currentExchangeTools: ToolMeta[] = []
@@ -228,41 +365,35 @@ export default function (pi: ExtensionAPI) {
   let currentExchangeCommands: string[] = []
   let currentUserText: string | undefined
 
-  // turn state
-  let currentTurnStartTs: string | undefined
-
-  // ── Session start ────────────────────────────────────────────────────────
+  let currentTurnStartMs: number | undefined
 
   pi.on('session_start', async (_event, ctx) => {
     sessionFile = ctx.sessionManager.getSessionFile() ?? null
     cwd = ctx.cwd
     sessionStartTs = new Date().toISOString()
 
-    // use the session file's embedded ID when available, otherwise generate one
     const entries = ctx.sessionManager.getEntries()
     const sessionEntry = entries.find((e) => e.type === 'session')
-    sessionId = (sessionEntry as Record<string, unknown> | undefined)?.['id'] as string | undefined ??
+    sessionRootSpanId = crypto.randomBytes(8).toString('hex')
+    sessionId =
+      (sessionEntry as Record<string, unknown> | undefined)?.['id'] as string | undefined ??
       crypto.randomUUID()
-  })
 
-  // ── Thinking level tracking ──────────────────────────────────────────────
+    const { theme } = ctx.ui
+    ctx.ui.setStatus('pi-observability', theme.fg('accent', '\u2b21 ') + theme.fg('dim', sinkLabel))
+  })
 
   type ThinkingLevelEvent = { thinkingLevel?: string }
   pi.on('thinking_level_select' as Parameters<typeof pi.on>[0], async (event: ThinkingLevelEvent) => {
     currentThinkingLevel = event.thinkingLevel
   })
 
-  // ── Model tracking ───────────────────────────────────────────────────────
-
   pi.on('model_select', async (event) => {
     currentModel = event.model.id
     currentProvider = event.model.provider
   })
 
-  // ── Capture context at the moment a prompt is sent ───────────────────────
-
   pi.on('before_agent_start', async (event, _ctx) => {
-    // fresh exchange ID for every user prompt
     currentExchangeId = crypto.randomUUID()
 
     const opts: BuildSystemPromptOptions = event.systemPromptOptions
@@ -271,18 +402,13 @@ export default function (pi: ExtensionAPI) {
     currentExchangeActiveToolNames = pi.getActiveTools()
     currentExchangeCommands = pi.getCommands().map((c) => c.name)
 
-    // extract plain user text (strip injected <skill> blocks)
     currentUserText = stripSkillBlocks(event.prompt).trim() || undefined
   })
 
-  // ── Turn timing ──────────────────────────────────────────────────────────
-
   pi.on('turn_start', async (_event, ctx) => {
-    currentTurnStartTs = new Date().toISOString()
+    currentTurnStartMs = Date.now()
     cwd = ctx.cwd
   })
-
-  // ── Emit one span per completed assistant turn ───────────────────────────
 
   pi.on('turn_end', async (event, _ctx) => {
     const msg = event.message as AssistantMessage | undefined
@@ -292,24 +418,13 @@ export default function (pi: ExtensionAPI) {
     const cost = usage.cost ?? {}
     const model = msg.model ?? currentModel ?? 'unknown'
     const provider = (msg.provider as string | undefined) ?? currentProvider ?? 'unknown'
-    const timestamp = new Date(msg.timestamp).toISOString()
-
-    let durationUs: number | undefined
-    if (currentTurnStartTs != null) {
-      const ms = msg.timestamp - new Date(currentTurnStartTs).getTime()
-      if (!Number.isNaN(ms) && ms >= 0) durationUs = ms * 1000
-    }
+    const endTimeMs = msg.timestamp
+    const startTimeMs = currentTurnStartMs ?? endTimeMs
 
     const { text, thinking, toolCalls } = extractAssistantText(msg)
     const toolResults = extractToolResults(event.toolResults)
 
-    const span: Record<string, unknown> = {
-      '@timestamp': timestamp,
-      'span.id': crypto.randomUUID(),
-      'trace.id': sessionId ?? cwd,
-      'span.name': `gen_ai chat ${model}`,
-      ...(durationUs != null ? { 'duration.us': durationUs } : {}),
-
+    const attributes: Record<string, unknown> = {
       'gen_ai.system': inferSystem(provider, model),
       'gen_ai.operation.name': 'chat',
       'gen_ai.request.model': model,
@@ -322,10 +437,10 @@ export default function (pi: ExtensionAPI) {
       'gen_ai.usage.total_tokens': usage.totalTokens,
 
       'message.user.text': currentUserText,
-      ...(text != null ? { 'message.assistant.text': text } : {}),
-      ...(thinking != null ? { 'message.assistant.thinking': thinking } : {}),
-      ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
-      ...(toolResults.length > 0 ? { tool_results: toolResults } : {}),
+      'message.assistant.text': text,
+      'message.assistant.thinking': thinking,
+      'tool_calls': toolCalls.length > 0 ? toolCalls : undefined,
+      'tool_results': toolResults.length > 0 ? toolResults : undefined,
       'turn.tool_call_count': toolCalls.length,
       'turn.tool_result_count': toolResults.length,
 
@@ -347,7 +462,7 @@ export default function (pi: ExtensionAPI) {
 
       'pi.turn.exchange_id': currentExchangeId,
       'pi.model.provider': provider,
-      'pi.model.api': (msg.api as string | undefined),
+      'pi.model.api': msg.api as string | undefined,
       'pi.thinking_level': currentThinkingLevel,
       'pi.thinking.present': thinking != null,
       'pi.response_id': msg.responseId,
@@ -355,43 +470,29 @@ export default function (pi: ExtensionAPI) {
       'cost.total_usd': cost.total,
       'cost.input_usd': cost.input,
       'cost.output_usd': cost.output,
-
-      'service.name': 'pi-coding-agent',
-      'telemetry.sdk.name': 'pi-observability-extension',
     }
 
-    stripUndefined(span)
+    stripUndefined(attributes)
 
-    // use pi.response_id as document ID when available (matches ETL idempotency)
-    const docId = (msg.responseId ?? span['span.id']) as string
-
-    emit(span as SpanDocument, docId)
+    emitSpan(
+      tracer,
+      `gen_ai chat ${model}`,
+      sessionId ?? cwd,
+      sessionRootSpanId,
+      startTimeMs,
+      endTimeMs,
+      attributes
+    )
   })
-
-  // ── Output sink (to be wired up separately) ──────────────────────────────
-
-  /**
-   * Emit a completed span document.
-   * The body of this function is intentionally left as a no-op stub —
-   * the output sink (file, HTTP, Elasticsearch bulk API, etc.) will be
-   * configured separately.
-   */
-  function emit (_span: SpanDocument, _docId: string): void {
-    // sink implementation goes here
-  }
 }
 
-// ─── Utility ─────────────────────────────────────────────────────────────────
-
 /**
- * Strip injected skill/annotation blocks from a prompt before storing user
- * text.  Handles both the paired-tag form (`<skill name="...">...</skill>`)
- * and the self-closing form (`<available_skills/>`).
+ * Strip injected skill/annotation blocks from a prompt before storing user text.
+ * Handles both paired-tag form (`<skill name="...">...</skill>`) and
+ * self-closing form (`<available_skills/>`).
  */
 export function stripSkillBlocks (text: string): string {
-  // paired tags: <tag-name ...>...</tag-name>
   let result = text.replace(/<([\w-]+)[^>]*>[\s\S]*?<\/\1>/g, '')
-  // self-closing annotation tags on their own line
   result = result.replace(/^[ \t]*<[\w-]+[^>]*\/>\s*$/gm, '')
   return result
 }

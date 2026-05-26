@@ -1,7 +1,7 @@
 {
   "name": "@the-agency/pi-observability",
   "version": "0.2.1",
-  "description": "Record tool usage, tokens, models, skills, and sessions as JSONL timeseries data in OpenTelemetry format.",
+  "description": "Record tool usage, tokens, models, skills, and sessions as OpenTelemetry GenAI spans.",
   "type": "module",
   "main": "index.ts",
   "scripts": {
@@ -17,7 +17,6 @@
   "files": [
     "*.ts",
     "!*.test.ts",
-    "!pi-sessions-to-otel.ts",
     "README.md",
     "LICENSE"
   ],
@@ -25,12 +24,20 @@
     "pi",
     "pi-package",
     "observability",
-    "elasticsearch",
+    "opentelemetry",
+    "otel",
     "metrics",
     "telemetry",
     "agents",
     "llm"
   ],
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/core": "^2.7.1",
+    "@opentelemetry/exporter-trace-otlp-http": "^0.218.0",
+    "@opentelemetry/resources": "^2.7.1",
+    "@opentelemetry/sdk-trace-base": "^2.7.1"
+  },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*"
   },
