@@ -62,6 +62,13 @@ interface ExtractedAssistantContent {
   toolCalls: SpanToolCall[]
 }
 
+/** Full content of a loaded skill, for session-init observability. */
+export interface SkillContent {
+  name: string
+  path: string
+  content: string
+}
+
 /** Metadata about a loaded skill. */
 interface SkillMeta {
   name: string
@@ -172,6 +179,24 @@ function buildSkillMeta (skills: Skill[] | undefined): SkillMeta[] {
     source: s.source,
     scope: s.source != null && (s.source.includes('~') || s.source.includes(process.env['HOME'] ?? '/home')) ? 'user' : 'project',
   }))
+}
+
+/**
+ * Read skill file contents for session-init observability.
+ * Skills whose file cannot be read are silently omitted.
+ */
+export function buildSkillContents (skills: Pick<Skill, 'name' | 'filePath'>[]): SkillContent[] {
+  if (skills.length === 0) return []
+  const results: SkillContent[] = []
+  for (const s of skills) {
+    try {
+      const content = fs.readFileSync(s.filePath, 'utf-8')
+      results.push({ name: s.name, path: s.filePath, content })
+    } catch {
+      // unreadable skill — omit silently
+    }
+  }
+  return results
 }
 
 /** Build trimmed tool metadata from pi.getAllTools(). */
@@ -365,10 +390,12 @@ export default function (pi: ExtensionAPI) {
   let currentExchangeCommands: string[] = []
   let currentUserText: string | undefined
 
+  let sessionInitEmitted = false
   let currentTurnStartMs: number | undefined
 
   pi.on('session_start', async (_event, ctx) => {
     sessionFile = ctx.sessionManager.getSessionFile() ?? null
+    sessionInitEmitted = false
     cwd = ctx.cwd
     sessionStartTs = new Date().toISOString()
 
@@ -403,6 +430,40 @@ export default function (pi: ExtensionAPI) {
     currentExchangeCommands = pi.getCommands().map((c) => c.name)
 
     currentUserText = stripSkillBlocks(event.prompt).trim() || undefined
+
+    if (!sessionInitEmitted) {
+      sessionInitEmitted = true
+      const nowMs = Date.now()
+      const skillContents = buildSkillContents(opts.skills ?? [])
+      const initAttributes: Record<string, unknown> = {
+        'pi.session.id': sessionId,
+        'pi.session.cwd': cwd,
+        'pi.session.start': sessionStartTs,
+        'pi.session.file': sessionFile ?? undefined,
+        'pi.session.system_prompt': event.systemPrompt,
+        'pi.session.skill_contents': skillContents.length > 0 ? skillContents : undefined,
+        'pi.session.skill_names': currentExchangeSkills.length > 0
+          ? currentExchangeSkills.map((s) => s.name)
+          : undefined,
+        'pi.session.tools': currentExchangeTools.length > 0 ? currentExchangeTools : undefined,
+        'pi.session.active_tools': currentExchangeActiveToolNames.length > 0
+          ? currentExchangeActiveToolNames
+          : undefined,
+        'pi.session.commands': currentExchangeCommands.length > 0 ? currentExchangeCommands : undefined,
+        'pi.model.provider': currentProvider,
+        'pi.thinking_level': currentThinkingLevel,
+      }
+      stripUndefined(initAttributes)
+      emitSpan(
+        tracer,
+        'session_init',
+        sessionId ?? cwd,
+        sessionRootSpanId,
+        nowMs,
+        nowMs,
+        initAttributes
+      )
+    }
   })
 
   pi.on('turn_start', async (_event, ctx) => {
