@@ -10,6 +10,7 @@ import {
   VM,
   VmCheckpoint,
   RealFSProvider,
+  ReadonlyProvider,
   createHttpHooks,
   type VMOptions,
   type DebugComponent,
@@ -474,7 +475,9 @@ async function cmdRun (args: string[]): Promise<void> {
   info('Resuming sandbox VM from checkpoint...')
   const checkpoint = VmCheckpoint.load(checkpointFile())
   const userMountProviders = Object.fromEntries(
-    mounts.map(m => [m.guest, new RealFSProvider(m.host)])
+    mounts.map(m => [m.guest, m.readonly
+      ? new ReadonlyProvider(new RealFSProvider(m.host))
+      : new RealFSProvider(m.host)])
   )
   const vm = await checkpoint.resume({
     sandbox: sandboxOptions(),
@@ -604,7 +607,9 @@ Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
                                   { "GITHUB_TOKEN": { "hosts": ["api.github.com"], "env": "MY_PAT" } }
   mounts                        Host directories to mount into the VM at runtime.
                                 Each entry maps a host path to an absolute guest path.
+                                Set "readonly": true for a read-only mount (writes fail with EROFS).
                                   [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
+                                  [{ "host": "~/.config/keys", "guest": "/root/.config/keys", "readonly": true }]
 
 Example .vmpirc.json (using the gh CLI with a GitHub token):
   {

@@ -290,7 +290,15 @@ describe('loadConfig', () => {
       mounts: [{ host: '~/.config/tool', guest: '/root/.config/tool' }],
     }))
     const cfg = loadConfig()
-    assert.deepEqual(cfg.mounts, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool' }])
+    assert.deepEqual(cfg.mounts, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool', readonly: false }])
+  })
+
+  it('reads readonly flag from config file and preserves it', () => {
+    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
+      mounts: [{ host: '/secrets', guest: '/root/secrets', readonly: true }],
+    }))
+    const cfg = loadConfig()
+    assert.deepEqual(cfg.mounts, [{ host: '/secrets', guest: '/root/secrets', readonly: true }])
   })
 
   it('finds config file in a parent directory', () => {
@@ -528,17 +536,39 @@ describe('resolveMounts', () => {
 
   it('passes through an absolute host path unchanged', () => {
     const result = resolveMounts([{ host: '/some/path', guest: '/root/path' }])
-    assert.deepEqual(result, [{ host: '/some/path', guest: '/root/path' }])
+    assert.deepEqual(result, [{ host: '/some/path', guest: '/root/path', readonly: false }])
+  })
+
+  it('defaults readonly to false when omitted', () => {
+    const result = resolveMounts([{ host: '/some/path', guest: '/root/path' }])
+    assert.equal(result[0].readonly, false)
+  })
+
+  it('preserves readonly when set to true', () => {
+    const result = resolveMounts([{ host: '/some/path', guest: '/root/path', readonly: true }])
+    assert.deepEqual(result, [{ host: '/some/path', guest: '/root/path', readonly: true }])
+  })
+
+  it('preserves readonly when explicitly set to false', () => {
+    const result = resolveMounts([{ host: '/some/path', guest: '/root/path', readonly: false }])
+    assert.deepEqual(result, [{ host: '/some/path', guest: '/root/path', readonly: false }])
+  })
+
+  it('throws when readonly is not a boolean', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '/some/path', guest: '/root/path', readonly: 'yes' as unknown as boolean }]),
+      /mounts\[0\].*readonly.*must be a boolean/
+    )
   })
 
   it('expands a ~ prefix in host path to the home directory', () => {
     const result = resolveMounts([{ host: '~/.config/tool', guest: '/root/.config/tool' }])
-    assert.deepEqual(result, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool' }])
+    assert.deepEqual(result, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool', readonly: false }])
   })
 
   it('expands a bare ~ host path to the home directory', () => {
     const result = resolveMounts([{ host: '~', guest: '/root/home' }])
-    assert.deepEqual(result, [{ host: homedir(), guest: '/root/home' }])
+    assert.deepEqual(result, [{ host: homedir(), guest: '/root/home', readonly: false }])
   })
 
   it('throws when host is an empty string', () => {
@@ -600,14 +630,14 @@ describe('resolveMounts', () => {
     )
   })
 
-  it('resolves multiple entries independently', () => {
+  it('resolves multiple entries independently, carrying readonly per entry', () => {
     const result = resolveMounts([
       { host: '~/.config/a', guest: '/root/.config/a' },
-      { host: '/data', guest: '/mnt/data' },
+      { host: '/data', guest: '/mnt/data', readonly: true },
     ])
     assert.deepEqual(result, [
-      { host: join(homedir(), '.config/a'), guest: '/root/.config/a' },
-      { host: '/data', guest: '/mnt/data' },
+      { host: join(homedir(), '.config/a'), guest: '/root/.config/a', readonly: false },
+      { host: '/data', guest: '/mnt/data', readonly: true },
     ])
   })
 

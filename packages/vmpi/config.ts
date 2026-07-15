@@ -193,8 +193,13 @@ export interface VmpiConfig {
    * ```json
    * [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
    * ```
+   *
+   * Example — expose credentials read-only so pi can read but not mutate them:
+   * ```json
+   * [{ "host": "~/.config/keys", "guest": "/root/.config/keys", "readonly": true }]
+   * ```
    */
-  mounts?: DirectoryMount[]
+  mounts?: MountConfigEntry[]
 }
 
 /** A single host-to-guest directory mount mapping. */
@@ -210,6 +215,26 @@ export interface DirectoryMount {
    * Example: `"/root/.config/some-tool"`.
    */
   guest: string
+
+  /**
+   * When `true`, the mount is read-only inside the VM: read operations succeed
+   * normally but any write attempt (create, modify, delete, rename) fails with
+   * `EROFS` (read-only filesystem). Defaults to `false` (writable).
+   *
+   * Use this to safely expose credential or config directories that pi should
+   * read but never mutate, e.g. `~/.config/keys`.
+   */
+  readonly: boolean
+}
+
+/**
+ * User-facing mount entry as it appears in a `.vmpirc.*` config file.
+ * `readonly` is optional and defaults to `false`; `resolveMounts` normalizes
+ * it into a fully-resolved `DirectoryMount`.
+ */
+export type MountConfigEntry = Omit<DirectoryMount, 'readonly'> & {
+  /** Whether the mount is read-only inside the VM. Defaults to `false`. */
+  readonly?: boolean
 }
 
 /** A resolved local service entry with the upstream address string. */
@@ -397,7 +422,7 @@ export function resolveLocalServices (network: NetworkConfig | undefined): Resol
  * Expands a leading `~` in `host` to the current user's home directory.
  * Throws if any entry has an empty `host` or non-absolute `guest` path.
  */
-export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryMount[] {
+export function resolveMounts (mounts: MountConfigEntry[] | undefined): DirectoryMount[] {
   const reservedGuestPaths = new Set(['/workspace', '/root/.pi'])
   const seenGuests = new Set<string>()
 
@@ -416,10 +441,14 @@ export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryM
 
     seenGuests.add(guest)
 
+    if (m.readonly != null && typeof m.readonly !== 'boolean') {
+      throw new Error(`mounts[${i}]: "readonly" must be a boolean (got: ${typeof m.readonly})`)
+    }
+
     const host = hostInput.startsWith('~/')
       ? join(homedir(), hostInput.slice(2))
       : hostInput === '~' ? homedir() : hostInput
-    return { host, guest }
+    return { host, guest, readonly: m.readonly === true }
   })
 }
 
