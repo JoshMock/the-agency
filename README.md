@@ -34,3 +34,14 @@ Doing better also means:
 - navigating code lexically: why grep when you can query a syntax tree?
 - optimizing prompts for accuracy, preventing agents from doing the wrong thing
 - measure performance where possible to find bottlenecks
+
+## Recommendations
+
+I'm not going to write a plugin or related tool if one already exists that solves a problem well. Here are some tools I'm currently using or experimenting with alongside these plugins:
+
+- [**headroom**](https://github.com/headroomlabs-ai/headroom): deterministic prompt compression, combining multiple tools and strategies, including [RTK](https://github.com/rtk-ai/rtk)
+- [**llama.cpp**](https://github.com/ggml-org/llama.cpp): serve open models locally; even if you only have a 4GB VRAM GPU in a laptop, coding inference with a [Qwen coding model](https://huggingface.co/collections/unsloth/qwen3-coder) is slow but effective
+- [**ponytail**](https://github.com/DietrichGebert/ponytail): build code that prefers simple, reusable solutions that depend on existing code and dependencies whenever possible
+- [**pi-subagents**](https://github.com/nicobailon/pi-subagents): I prefer to "pair program" with an agent iteratively; in the rare case you need to distribute work to multiple agents to keep contexts clean, this is all you need
+- **maintaining long-term memory by hand:** I have tried several solutions that help an agent learn and get better on its own over time. They worked, but burn extra tokens on a self-learning loop. Putting reusable instructions in the context files an agent already uses is simple and just as effective. When something goes wrong, edit AGENTS.md by hand, or update Pi's APPEND_SYSTEM.md file for general instruction. If the file gets too long, apply the [progressive disclosure](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices#progressive-disclosure-patterns) pattern: split it up and use AGENTS.md as table of contents.
+- [**pi-autoresearch**](https://github.com/davebcn87/pi-autoresearch): one of the other rare use cases where I let an agent loose on its own is looking for performance optimizations; autoresearch is the simplest solution.
