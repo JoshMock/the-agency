@@ -2,11 +2,11 @@ A collection of extensions, skills, tools and experiments with the [Pi coding ag
 
 ## Current offerings
 
-- [**@the-agency/pi-tokenshrink**](./packages/tokenshrink/): reduce a prompt's token count deterministically, without using inference
-- [**@the-agency/pi-hashline-edit**](./packages/hashline-edit/): alternate to Pi's built in `edit` tool that improves the accuracy and efficiency of file edits, with high potential to reduce token usage
-- [**@the-agency/pi-spec-kit**](./packages/spec-kit/): use [Spec Kit](https://github.com/github/spec-kit) for spec-driven development
-- [**@the-agency/vmpi**](./packages/vmpi/): run `pi` sandboxed in a QEMU microVM via [Gondolin](https://earendil-works.github.io/gondolin/) -- hardware-isolated, no root required
-- [**@the-agency/pi-observability**](./packages/observability/): record OpenTelemetry logs for your Pi sessions
+- [**@the-agency/pi-tokenshrink**](./packages/tokenshrink/): reduce a prompt's token count deterministically, without using inference ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-tokenshrink)
+- [**@the-agency/pi-hashline-edit**](./packages/hashline-edit/): alternate to Pi's built in `edit` tool that improves the accuracy and efficiency of file edits, with high potential to reduce token usage ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-hashline-edit)
+- [**@the-agency/pi-spec-kit**](./packages/spec-kit/): use [Spec Kit](https://github.com/github/spec-kit) for spec-driven development ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-spec-kit)
+- [**@the-agency/vmpi**](./packages/vmpi/): run `pi` sandboxed in a QEMU microVM via [Gondolin](https://earendil-works.github.io/gondolin/) -- hardware-isolated, no root required ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fvmpi)
+- [**@the-agency/pi-observability**](./packages/observability/): record OpenTelemetry logs for your Pi sessions ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-observability)
 
 ## Goals
 

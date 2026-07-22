@@ -1,5 +1,7 @@
 # @the-agency/pi-observability
 
+![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-observability)
+
 Pi extension that emits one [OTel GenAI](https://opentelemetry.io/docs/specs/semconv/gen-ai/)-compatible span per assistant turn. Spans are always exported — to an OTLP collector when one is configured, or to local JSONL files otherwise.
 
 ## What it captures

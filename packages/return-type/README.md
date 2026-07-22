@@ -1,5 +1,7 @@
 # @the-agency/pi-return-type
 
+![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-return-type)
+
 A [Pi](https://github.com/badlogic/pi-mono) extension that registers a `return_result` tool, letting the agent hand back a structured JSON value directly to your code — no disk writes, no text parsing.
 
 ## The problem

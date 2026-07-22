@@ -1,5 +1,7 @@
 # pi-hashline-edit
 
+![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-hashline-edit)
+
 A [Pi](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) extension, to substitute for the built-in `edit` tool, which uses a hashline-based file editing strategy to improve the accuracy and efficiency of agents' file-editing abilities, reducing the likelihood of failed edits that require extra turns and tokens by the agent.
 
 This editing strategy has improved the edit success rate of Gemini models by 8%, Claude Sonnet 4.5 by 14.4%, etc. and reduced overall token usage, **without requiring any additional training to these models**.
