@@ -10,6 +10,8 @@ import * as path from 'node:path'
 
 import {
   FileSpanExporter,
+
+  buildSkillContents,
   createTracerProvider,
   extractAssistantText,
   extractToolResults,
@@ -379,3 +381,53 @@ function makeFakeSpan (name: string, traceId: string, spanId: string): Parameter
     droppedLinksCount: 0,
   }
 }
+
+describe('buildSkillContents', () => {
+  let tmpDir: string
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-obs-skills-'))
+  })
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('reads file content for each skill', () => {
+    const skillPath = path.join(tmpDir, 'my-skill.md')
+    fs.writeFileSync(skillPath, '# My Skill\nDo stuff.')
+    const skills = [{ name: 'my-skill', filePath: skillPath }]
+    const result = buildSkillContents(skills as Parameters<typeof buildSkillContents>[0])
+    assert.equal(result.length, 1)
+    assert.equal(result[0].name, 'my-skill')
+    assert.equal(result[0].path, skillPath)
+    assert.equal(result[0].content, '# My Skill\nDo stuff.')
+  })
+
+  it('returns empty array for empty input', () => {
+    assert.deepEqual(buildSkillContents([]), [])
+  })
+
+  it('omits skills whose file cannot be read', () => {
+    const skills = [{ name: 'missing', filePath: path.join(tmpDir, 'nonexistent.md') }]
+    const result = buildSkillContents(skills as Parameters<typeof buildSkillContents>[0])
+    assert.equal(result.length, 0)
+  })
+
+  it('reads multiple skills', () => {
+    const pathA = path.join(tmpDir, 'a.md')
+    const pathB = path.join(tmpDir, 'b.md')
+    fs.writeFileSync(pathA, 'skill A content')
+    fs.writeFileSync(pathB, 'skill B content')
+    const skills = [
+      { name: 'skill-a', filePath: pathA },
+      { name: 'skill-b', filePath: pathB },
+    ]
+    const result = buildSkillContents(skills as Parameters<typeof buildSkillContents>[0])
+    assert.equal(result.length, 2)
+    assert.equal(result[0].name, 'skill-a')
+    assert.equal(result[0].content, 'skill A content')
+    assert.equal(result[1].name, 'skill-b')
+    assert.equal(result[1].content, 'skill B content')
+  })
+})
