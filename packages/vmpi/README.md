@@ -1,5 +1,7 @@
 # vmpi
 
+![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fvmpi)
+
 Run `pi` sandboxed in a [QEMU](https://www.qemu.org/) microVM via [Gondolin](https://earendil-works.github.io/gondolin/).
 
 `vmpi` feels just like `pi`, but the agent runs in a hardware-isolated sandbox with access to only:

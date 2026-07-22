@@ -1,5 +1,7 @@
 # @the-agency/pi-spec-kit
 
+![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-spec-kit)
+
 A [Pi](https://github.com/mariozechner/pi-coding-agent) package that integrates GitHub's [Spec Kit](https://github.com/github/spec-kit) in a Pi-native way, to support a spec-driven development workflow for planning and building features in a software repository.
 
 ## Overview

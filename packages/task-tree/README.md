@@ -1,5 +1,7 @@
 # pi-task-tree
 
+![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-task-tree)
+
 Tree-based task orchestration in a single Node.js process for [Pi](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent swarms.
 
 [DAG](https://en.wikipedia.org/wiki/Directed_acyclic_graph)-based task orchestration for [Pi](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) agent swarms. Define tasks as nodes in a tree and `pi-task-tree` will execute them in the right order, running independent tasks in parallel. To keep things simple and prevent this turning into a Kubernetes competitor, all orchestration happens within a single Node process.
