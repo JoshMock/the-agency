@@ -139,7 +139,7 @@ export interface SecretEntryConfig {
 export type SecretsConfig = Record<string, SecretEntryConfig>
 /** Top-level vmpi configuration file schema. */
 export interface VmpiConfig {
-  /** RAM in MiB (default: 512). */
+  /** RAM in MiB (default: 1024). */
   memory?: number
 
   /** vCPU count (default: 1). */
@@ -439,7 +439,7 @@ export function loadConfig (): ResolvedConfig {
   const result = explorer.search()
   const file: VmpiConfig = result?.config ?? {}
 
-  const memory = num(process.env.VMPI_MEMORY) ?? file.memory ?? 512
+  const memory = num(process.env.VMPI_MEMORY) ?? file.memory ?? 1024
   const cpus = num(process.env.VMPI_CPUS) ?? file.cpus ?? 1
   const piConfigDir = process.env.PI_CONFIG_DIR ?? file.piConfigDir ?? join(homedir(), '.pi')
   const stateDir = process.env.VMPI_STATE_DIR ?? file.stateDir ?? join(homedir(), '.vmpi')

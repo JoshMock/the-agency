@@ -2,8 +2,8 @@
 
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { accessSync, constants as fsConstants, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { delimiter, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Command } from 'commander'
 import {
@@ -56,6 +56,45 @@ function info (message: string): void {
 }
 
 /**
+ * Platform-specific directories to search for host tools in addition to PATH.
+ * On macOS, Homebrew's e2fsprogs formula is keg-only (not linked into
+ * <prefix>/bin), so its binaries live in the keg's sbin directory.
+ */
+const EXTRA_TOOL_DIRS: Record<string, string[]> = {
+  darwin: [
+    '/opt/homebrew/opt/e2fsprogs/sbin',
+    '/opt/homebrew/opt/e2fsprogs/bin',
+    '/usr/local/opt/e2fsprogs/sbin',
+    '/usr/local/opt/e2fsprogs/bin',
+  ],
+  linux: [],
+}
+
+/**
+ * Resolves a host tool by name, searching PATH first, then platform-specific
+ * extra directories. Returns the absolute path, or null when not found.
+ */
+function findHostTool (tool: string): string | null {
+  const pathDirs = (process.env.PATH ?? '').split(delimiter).filter(d => d !== '')
+  const extraDirs = EXTRA_TOOL_DIRS[process.platform] ?? []
+  for (const dir of [...pathDirs, ...extraDirs]) {
+    const candidate = join(dir, tool)
+    try {
+      accessSync(candidate, fsConstants.X_OK)
+      return candidate
+    } catch { /* not here — keep searching */ }
+  }
+  return null
+}
+
+/** Platform-specific hint appended to messages when e2fsprogs is missing. */
+function e2fsprogsHint (): string {
+  return process.platform === 'darwin'
+    ? ' (install it with: brew install e2fsprogs)'
+    : ' (install e2fsprogs via your package manager)'
+}
+
+/**
  * Ensures Gondolin's rootfs.ext4 has enough free space to store the pi bundle.
  * If free space is below `rootfsExtraMb`, grows the image by `rootfsExtraMb` MiB
  * using `qemu-img resize` then repairs and expands the filesystem with
@@ -63,6 +102,10 @@ function info (message: string): void {
  *
  * Skipped entirely if the rootfs already has sufficient headroom.
  * The `rootfsExtraMb` value comes from config (default: 128).
+ *
+ * Requires e2fsprogs on the host. On macOS these tools are not part of the
+ * base system; `brew install e2fsprogs` provides them (keg-only, which is
+ * why findHostTool also probes the Homebrew keg paths).
  */
 async function ensureRootfsHeadroom (): Promise<void> {
   const { ensureGuestAssets } = await import('@earendil-works/gondolin')
@@ -72,7 +115,12 @@ async function ensureRootfsHeadroom (): Promise<void> {
 
   // Query current free blocks via `resize2fs -P` (prints minimum size, not free
   // space directly). Use `dumpe2fs` instead for accurate free block count.
-  const dump = spawnSync('dumpe2fs', ['-h', rootfsPath], { stdio: 'pipe' })
+  const dumpe2fs = findHostTool('dumpe2fs')
+  if (dumpe2fs == null) {
+    info(`Warning: dumpe2fs not found — skipping rootfs resize check${e2fsprogsHint()}`)
+    return
+  }
+  const dump = spawnSync(dumpe2fs, ['-h', rootfsPath], { stdio: 'pipe' })
   if (dump.status !== 0) {
     info('Warning: could not inspect rootfs with dumpe2fs — skipping resize check')
     return
@@ -92,16 +140,22 @@ async function ensureRootfsHeadroom (): Promise<void> {
     return
   }
 
+  const e2fsck = findHostTool('e2fsck')
+  const resize2fs = findHostTool('resize2fs')
+  if (e2fsck == null || resize2fs == null) {
+    die(`rootfs free space is low but e2fsck/resize2fs were not found — cannot grow the image${e2fsprogsHint()}`)
+  }
+
   info(`Rootfs free space is low — growing image by ${extraMb} MiB...`)
   const resizeResult = spawnSync('qemu-img', ['resize', rootfsPath, `+${extraMb}M`], { stdio: 'inherit' })
   if (resizeResult.status !== 0) die('qemu-img resize failed')
 
   // e2fsck must run on an unmounted image before resize2fs
-  const fsckResult = spawnSync('e2fsck', ['-f', '-y', rootfsPath], { stdio: 'inherit' })
+  const fsckResult = spawnSync(e2fsck, ['-f', '-y', rootfsPath], { stdio: 'inherit' })
   // e2fsck exits 1 for corrected errors, 2 for errors requiring reboot — both are fine here
   if (fsckResult.status != null && fsckResult.status > 2) die('e2fsck failed')
 
-  const resizeFsResult = spawnSync('resize2fs', [rootfsPath], { stdio: 'inherit' })
+  const resizeFsResult = spawnSync(resize2fs, [rootfsPath], { stdio: 'inherit' })
   if (resizeFsResult.status !== 0) die('resize2fs failed')
 
   info(`Rootfs grown by ${extraMb} MiB`)
@@ -163,16 +217,65 @@ async function vmExec (vm: VM, cmd: string, { forwardStdout = true }: { forwardS
 }
 
 /**
+ * npm `--cpu` value matching the guest VM architecture. Gondolin runs the
+ * guest at the host's architecture, so map process.arch directly.
+ */
+function guestNpmCpu (): string {
+  switch (process.arch) {
+    case 'arm64': return 'arm64'
+    case 'x64': return 'x64'
+    default: throw new Error(`unsupported host architecture for building the pi bundle: ${process.arch}`)
+  }
+}
+
+let _npmSupportsLibc: boolean | undefined
+
+/**
+ * Returns true when the npm on PATH supports the `--libc` flag (npm >= 10.2).
+ * Older npm versions silently ignore unknown platform flags in some cases and
+ * fail hard in others, so the flag is only passed when supported.
+ */
+function npmSupportsLibc (): boolean {
+  if (_npmSupportsLibc == null) {
+    const res = spawnSync('npm', ['--version'], { stdio: 'pipe' })
+    const [major = 0, minor = 0] = (res.stdout?.toString().trim() ?? '0.0').split('.').map(Number)
+    _npmSupportsLibc = major > 10 || (major === 10 && minor >= 2)
+  }
+  return _npmSupportsLibc
+}
+
+/**
+ * npm install flags that target the guest platform (Alpine Linux on the
+ * host's CPU architecture, musl libc) instead of the host platform. Without
+ * these, npm resolves platform-specific optional dependencies (napi prebuilds
+ * such as `@mariozechner/clipboard-*`) for the host OS/arch/libc, producing
+ * binaries that cannot load inside the VM.
+ */
+function guestPlatformNpmArgs (): string[] {
+  const args = ['--os=linux', `--cpu=${guestNpmCpu()}`]
+  if (npmSupportsLibc()) args.push('--libc=musl')
+  else info('Warning: npm < 10.2 does not support --libc — bundle may contain wrong-libc native modules')
+  return args
+}
+
+/** Short platform tag used in the bundle cache filename. */
+function guestPlatformTag (): string {
+  return `linux-${guestNpmCpu()}-musl`
+}
+
+/**
  * Downloads the pi-coding-agent tarball from the npm registry, installs it
  * locally to get a full `node_modules` tree, and returns a compressed archive
- * of that tree. The archive is cached in `stateDir/cache/` keyed by version.
+ * of that tree. The archive is cached in `stateDir/cache/`, keyed by version,
+ * guest platform, and the user's pi package list.
  *
  * This approach avoids running `npm install` inside the VM entirely:
- *   - The VM's rootfs has only ~79 MB free; pi's node_modules is ~180 MB
- *   - The rootfs is auto-grown by ensureRootfsHeadroom() but /tmp is tmpfs,
- *   - Instead, store the 33 MB compressed archive on the rootfs (/opt/),
- *     extract to /tmp (tmpfs, ~50% of VM RAM) on each run; 512 MiB RAM gives
- *     ~256 MiB of tmpfs, which comfortably fits the ~180 MB extracted bundle
+ *   - The VM's rootfs has only ~90 MiB free; pi's node_modules needs ~250 MiB
+ *     once extracted (many small files; tmpfs spends a 4 KiB page on each)
+ *   - Instead, store the ~27 MB compressed archive on the rootfs (/opt/),
+ *     and extract to /tmp (tmpfs) on each run. /tmp is remounted with an
+ *     explicit size before extraction because the kernel default (50% of
+ *     guest RAM) is too small for the bundle at lower memory settings.
  */
 async function buildPiBundle (): Promise<Buffer> {
   const cacheDir = join(getConfig().stateDir, 'cache')
@@ -198,7 +301,7 @@ async function buildPiBundle (): Promise<Buffer> {
     } catch { /* use default */ }
   }
 
-  const bundlePath = join(cacheDir, `pi-bundle-${version}-${pkgHash}.tgz`)
+  const bundlePath = join(cacheDir, `pi-bundle-${version}-${guestPlatformTag()}-${pkgHash}.tgz`)
   if (existsSync(bundlePath)) {
     info(`Using cached pi bundle (${version})`)
     return readFileSync(bundlePath)
@@ -228,8 +331,9 @@ async function buildPiBundle (): Promise<Buffer> {
   const tarballPath = join(installDir, 'pi.tgz')
   writeFileSync(tarballPath, tarball)
 
+  const platformArgs = guestPlatformNpmArgs()
   const npmResult = spawnSync(
-    'npm', ['install', tarballPath, '--save'],
+    'npm', ['install', tarballPath, '--save', ...platformArgs],
     { cwd: installDir, stdio: 'inherit' }
   )
   if (npmResult.status !== 0) throw new Error('npm install failed while building pi bundle')
@@ -241,7 +345,7 @@ async function buildPiBundle (): Promise<Buffer> {
     info(`Installing ${npmPackages.length} pi package(s) into bundle...`)
     const specs = npmPackages.map(p => p.slice('npm:'.length))
     const pkgResult = spawnSync(
-      'npm', ['install', ...specs, '--save', '--legacy-peer-deps'],
+      'npm', ['install', ...specs, '--save', '--legacy-peer-deps', ...platformArgs],
       { cwd: installDir, stdio: 'inherit' }
     )
     if (pkgResult.status !== 0) {
@@ -507,9 +611,18 @@ async function cmdRun (args: string[]): Promise<void> {
     prepareSessionsForVm(process.cwd(), piConfigSnapshotDir)
 
     info('Extracting pi bundle...')
+    // /tmp is a tmpfs whose kernel-default size is 50% of guest RAM. That is
+    // too small for the extracted bundle: at 512 MiB RAM the cap is ~233 MiB
+    // (~466 MiB MemTotal on aarch64 after kernel reservations), while the
+    // bundle needs ~250 MiB of tmpfs (its ~19k small files each spend a full
+    // 4 KiB page). Remount /tmp with an explicit, larger cap before extracting.
+    // The cap is only an upper bound — pages are allocated on demand — so
+    // deriving it from the configured memory keeps every memory setting safe.
+    const tmpfsMb = Math.floor(memory * 0.75)
     // Extract to /tmp/lib/ so node_modules lands at /tmp/lib/node_modules,
     // matching npm's global root when prefix=/tmp (prefix/lib/node_modules).
     await vmExec(vm, [
+      `mount -o remount,size=${tmpfsMb}M /tmp`,
       'mkdir -p /tmp/lib',
       'tar xzf /opt/pi-modules.tgz -C /tmp/lib/',
       'npm config set prefix /tmp',
@@ -588,7 +701,7 @@ async function cmdRun (args: string[]): Promise<void> {
 const CONFIG_HELP = `
 Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
 
-  memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 512)
+  memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 1024)
   cpus            vCPU count                  (env: VMPI_CPUS,      default: 1)
   piConfigDir     pi config dir on host       (env: PI_CONFIG_DIR,  default: ~/.pi)
   stateDir        vmpi state dir on host      (env: VMPI_STATE_DIR, default: ~/.vmpi)
