@@ -155,7 +155,7 @@ describe('loadConfig', () => {
 
   it('returns defaults when no config file or env vars are present', () => {
     const cfg = loadConfig()
-    assert.equal(cfg.memory, 512)
+    assert.equal(cfg.memory, 1024)
     assert.equal(cfg.cpus, 1)
     assert.equal(cfg.piConfigDir, join(homedir(), '.pi'))
     assert.equal(cfg.stateDir, join(homedir(), '.vmpi'))
