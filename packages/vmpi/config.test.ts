@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import {
   PROVIDER_DOMAINS,
+  MIN_MEMORY_MB,
   resolveAllowedDomains,
   resolvePolicy,
   resolveLocalServices,
@@ -205,9 +206,9 @@ describe('loadConfig', () => {
 
   it('env vars take precedence over config file values', () => {
     writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ memory: 1024 }))
-    process.env.VMPI_MEMORY = '128'
+    process.env.VMPI_MEMORY = '768'
     const cfg = loadConfig()
-    assert.equal(cfg.memory, 128)
+    assert.equal(cfg.memory, 768)
   })
 
   it('resolves providers from a config file into allowed domains', () => {
@@ -349,6 +350,16 @@ describe('loadConfig', () => {
       GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'alpha' },
     })
     delete process.env.VMPI_TEST_SECRET_A
+  })
+
+  it('throws when memory is below the minimum safe value', () => {
+    process.env.VMPI_MEMORY = String(MIN_MEMORY_MB - 1)
+    assert.throws(() => loadConfig(), /VMPI_MEMORY must be at least/)
+  })
+
+  it('does not throw at exactly the minimum safe memory', () => {
+    process.env.VMPI_MEMORY = String(MIN_MEMORY_MB)
+    assert.doesNotThrow(() => loadConfig())
   })
 })
 
