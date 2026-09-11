@@ -12,7 +12,7 @@ Run `pi` sandboxed in a [QEMU](https://www.qemu.org/) microVM via [Gondolin](htt
 
 ...and nothing else.
 
-**Resources:** 512 MiB RAM, 1 vCPU, network restricted to configured LLM provider domains
+**Resources:** 1024 MiB RAM, 1 vCPU, network restricted to configured LLM provider domains
 
 **No root required:** Gondolin's QEMU backend runs entirely as the current user.
 
@@ -35,6 +35,16 @@ Running `pi` directly gives the agent access to your entire filesystem and unres
 ### QEMU
 
 For both macOS and Linux, [QEMU](https://www.qemu.org/) is required. Look for installation instructions appropriate to your environment.
+
+### e2fsprogs (recommended)
+
+`vmpi setup` uses `dumpe2fs`, `e2fsck`, and `resize2fs` to check and, when necessary, grow the Gondolin rootfs image. On Linux these come with your distribution's `e2fsprogs` package. On macOS they are not part of the base system; install them with:
+
+```bash
+brew install e2fsprogs
+```
+
+The formula is keg-only, but `vmpi` probes the Homebrew keg paths (`/opt/homebrew/opt/e2fsprogs/sbin`, `/usr/local/opt/e2fsprogs/sbin`) automatically. Without e2fsprogs, setup skips the resize check with a warning.
 
 ## Install
 
@@ -99,7 +109,7 @@ It searches for configuration files from your current directory up to the root d
 
 ```json
 {
-  "memory": 512,
+  "memory": 1024,
   "cpus": 2,
   "network": {
     "providers": ["github-copilot", "anthropic"],
@@ -128,7 +138,7 @@ To use the `gh` CLI inside the sandbox, add the `github` network preset and forw
 
 | Key | Default | Description |
 |---|---|---|
-| `memory` | `512` | RAM in MiB |
+| `memory` | `1024` | RAM in MiB |
 | `cpus` | `1` | vCPU count |
 | `piConfigDir` | `~/.pi` | Path to the pi config directory on the host |
 | `stateDir` | `~/.vmpi` | Where vmpi stores the base checkpoint and tarball cache |
@@ -160,7 +170,7 @@ Multiple providers can be combined. Their domains are merged with any `allowedDo
 ## How it works
 
 Gondolin manages QEMU microVMs with a JavaScript-implemented network stack and VFS.
-`vmpi setup` builds a **base checkpoint** by installing pi, along with any extensions listed in your `~/.pi/agent/settings.json`, into a fresh VM and saving a disk snapshot. Each `vmpi` run resumes from that checkpoint, then mounts the workspace and `~/.pi` via VFS providers (`RealFSProvider`).
+`vmpi setup` builds a **base checkpoint** by installing pi, along with any extensions listed in your `~/.pi/agent/settings.json`, into a fresh VM and saving a disk snapshot. The pi bundle is assembled on the host with npm flags targeting the guest platform (`--os=linux --cpu=<host arch> --libc=musl`), so platform-specific optional dependencies resolve to binaries that work inside the Alpine VM regardless of the host OS. Each `vmpi` run resumes from that checkpoint, then mounts the workspace and `~/.pi` via VFS providers (`RealFSProvider`).
 
 The pi tarball is downloaded on the host (not inside the VM) because Gondolin's
 MITM proxy does not reliably handle large concurrent streaming downloads. The
@@ -191,9 +201,9 @@ is group-readable (the default on most Linux distros with KVM enabled).
 
 ## Limitations
 
-- **macOS and aarch64 are untested:** Support has only been tested on Linux. Other platforms may need adjustments; pull requests welcome!
+- **Platforms:** Tested on Linux (x86_64) and macOS (Apple Silicon). The guest VM always matches the host architecture (aarch64 hosts run the aarch64 guest image). Other platforms may need adjustments; pull requests welcome!
 - **First run is slow:** `vmpi setup` downloads the Gondolin guest image (\~300 MB),
   downloads the pi tarball (\~4 MB), and runs `npm install` inside the VM. Subsequent runs are much faster as they resume from the checkpoint created during setup.
-- **Rootfs free space:** Gondolin's Alpine rootfs image has limited free space (~79 MiB). `vmpi setup` automatically grows the image by `rootfsExtraMb` MiB (default: 128) whenever free space is below that threshold. If setup still fails with a "disk full" error, increase `rootfsExtraMb` in your `.vmpirc.json` or via `VMPI_ROOTFS_EXTRA_MB`.
+- **Rootfs free space:** Gondolin's Alpine rootfs image has limited free space (~90 MiB). `vmpi setup` automatically grows the image by `rootfsExtraMb` MiB (default: 128) whenever free space is below that threshold. This requires e2fsprogs on the host (see Requirements); without it the check is skipped with a warning. If setup still fails with a "disk full" error, increase `rootfsExtraMb` in your `.vmpirc.json` or via `VMPI_ROOTFS_EXTRA_MB`.
 - **Session directory is tmpfs:** `/root`, `/tmp`, and `/var/log` are tmpfs-backed in the guest and will be dropped from memory on quit. Sessions under `/root/.pi` are visible on the host via the VFS mount and are not lost when the VM closes.
 - **Ctrl-z does not background vmpi:** In a regular terminal, pressing `Ctrl-z` suspends Pi. This does not work with `vmpi`. As a workaround, run `vmpi` inside a terminal multiplexer like [tmux](https://github.com/tmux/tmux), [screen](https://www.gnu.org/software/screen/), or [Zellij](https://zellij.dev).
