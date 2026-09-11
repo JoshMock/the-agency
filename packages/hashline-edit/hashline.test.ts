@@ -214,6 +214,32 @@ describe('applyHashlineEdits', () => {
       ])
       assert.equal(result.lines, 'aaa\nbbb\nXXX\nddd')
     })
+
+    it('drops multiple leading payload lines that echo preceding survivors', () => {
+      const text = 'aaa\nbbb\nccc\nddd\neee'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(3, 'ccc'),
+          end: anchorFor(4, 'ddd'),
+          lines: ['aaa', 'bbb', 'NEW'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nbbb\nNEW\neee')
+    })
+
+    it('drops leading and trailing echoes together but keeps real content', () => {
+      const text = 'aaa\nbbb\nccc\nddd\neee'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(2, 'bbb'),
+          end: anchorFor(4, 'ddd'),
+          lines: ['aaa', 'MID', 'eee'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nMID\neee')
+    })
   })
 
   describe('current content check', () => {

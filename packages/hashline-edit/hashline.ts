@@ -440,37 +440,55 @@ export function applyHashlineEdits (
         } else {
           const count = edit.end.line - edit.pos.line + 1
           const newLines = [...edit.lines]
-          // Leading echo: the payload starts by repeating the surviving line
-          // immediately before the range (the model re-emitted context above the
-          // edit). Drop it, but only when replacement content still remains and
-          // the echoed text is not itself the first line inside the range.
-          const leadingReplacementLine = newLines[0]?.trimEnd()
-          const prevSurvivingLine = fileLines[edit.pos.line - 2]?.trimEnd()
-          if (
-            newLines.length > 1 &&
-            leadingReplacementLine &&
-            prevSurvivingLine &&
-            leadingReplacementLine === prevSurvivingLine &&
-            fileLines[edit.pos.line - 1]?.trimEnd() !== leadingReplacementLine
-          ) {
-            newLines.shift()
-            warnings.push(
-              `Auto-corrected range replace ${edit.pos.line}#${edit.pos.hash}-${edit.end.line}#${edit.end.hash}: removed leading line that duplicated preceding surviving line`
-            )
+
+          // Boundary echoes: a range replace sometimes re-emits the surviving
+          // lines just outside the range (context above and/or below the edit)
+          // as part of its payload. Detect the longest run of leading payload
+          // lines that duplicates the survivors immediately above the range,
+          // and likewise for trailing lines below it, then drop them so long as
+          // at least one genuine replacement line remains.
+          const echoRun = (payloadFrom: number, sourceFrom: number, max: number): number => {
+            for (let n = max; n >= 1; n--) {
+              let matched = true
+              let hasContent = false
+              for (let i = 0; i < n; i++) {
+                const payload = newLines[payloadFrom(n) + i]?.trimEnd()
+                const survivor = fileLines[sourceFrom(n) + i]?.trimEnd()
+                if (payload !== survivor) {
+                  matched = false
+                  break
+                }
+                if (payload) hasContent = true
+              }
+              if (matched && hasContent) return n
+            }
+            return 0
           }
-          const trailingReplacementLine =
-            newLines[newLines.length - 1]?.trimEnd()
-          const nextSurvivingLine = fileLines[edit.end.line]?.trimEnd()
-          if (
-            trailingReplacementLine &&
-            nextSurvivingLine &&
-            trailingReplacementLine === nextSurvivingLine &&
-            fileLines[edit.end.line - 1]?.trimEnd() !==
-              trailingReplacementLine
-          ) {
-            newLines.pop()
+
+          let dropLeading = echoRun(
+            () => 0,
+            (n) => edit.pos.line - 1 - n,
+            Math.min(newLines.length, edit.pos.line - 1)
+          )
+          let dropTrailing = echoRun(
+            (n) => newLines.length - n,
+            () => edit.end.line,
+            Math.min(newLines.length, fileLines.length - edit.end.line)
+          )
+          // Never strip so much that no replacement content is left.
+          while (dropLeading + dropTrailing > 0 && newLines.length - dropLeading - dropTrailing < 1) {
+            if (dropTrailing >= dropLeading) dropTrailing--
+            else dropLeading--
+          }
+          if (dropLeading > 0 || dropTrailing > 0) {
+            newLines.splice(0, dropLeading)
+            if (dropTrailing > 0) newLines.splice(newLines.length - dropTrailing, dropTrailing)
+            const removed = [
+              dropLeading > 0 ? `${dropLeading} leading` : null,
+              dropTrailing > 0 ? `${dropTrailing} trailing` : null,
+            ].filter(Boolean).join(' and ')
             warnings.push(
-              `Auto-corrected range replace ${edit.pos.line}#${edit.pos.hash}-${edit.end.line}#${edit.end.hash}: removed trailing line that duplicated next surviving line`
+              `Auto-corrected range replace ${edit.pos.line}#${edit.pos.hash}-${edit.end.line}#${edit.end.hash}: removed ${removed} line(s) that duplicated surrounding surviving lines`
             )
           }
           fileLines.splice(edit.pos.line - 1, count, ...newLines)
