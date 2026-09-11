@@ -20,11 +20,15 @@ import {
   parseTag,
   applyHashlineEdits,
   HashlineMismatchError,
+  createNoopTracker,
   type HashlineEdit,
 } from './hashline.js'
 
 const DEFAULT_MAX_BYTES = 50 * 1024
 const DEFAULT_MAX_LINES = 2000
+
+// Loop guard: escalate when an agent resubmits the same no-op edit repeatedly.
+const noopTracker = createNoopTracker()
 
 const hashlineReadSchema = Type.Object({
   path: Type.String({ description: 'Path to the file to read (relative or absolute)' }),
@@ -329,12 +333,29 @@ export default function (pi: ExtensionAPI) {
         const result = applyHashlineEdits(text, edits)
 
         if (result.firstChangedLine == null) {
+          const { count, escalate } = noopTracker.record(
+            filePath,
+            JSON.stringify(params.edits)
+          )
+          if (escalate) {
+            return {
+              content: [{
+                type: 'text',
+                text:
+                  `STOP. The same edit to ${params.path} has been a no-op ${count} times in a row — ` +
+                  'the file already matches the requested content. Re-read the file before editing again.',
+              }],
+              isError: true,
+            }
+          }
           let msg = 'No changes applied.'
           if (result.noopEdits && result.noopEdits.length > 0) {
             msg += ` ${result.noopEdits.length} edit(s) were no-ops (content already matches).`
           }
           return { content: [{ type: 'text', text: msg }] }
         }
+
+        noopTracker.reset(filePath)
 
         await writeFile(filePath, result.lines, 'utf-8')
 

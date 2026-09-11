@@ -533,3 +533,38 @@ export function applyHashlineEdits (
     ...(noopEdits.length > 0 ? { noopEdits } : {}),
   }
 }
+
+/** Result of recording a no-op edit submission for a file. */
+export interface NoopEscalation {
+  /** Consecutive count of the identical no-op payload for this key. */
+  count: number
+  /** True once the count reaches the escalation threshold. */
+  escalate: boolean
+}
+
+/**
+ * Track repeated byte-identical no-op edits per file.
+ *
+ * An agent stuck in a loop may resubmit the same edit that changes nothing.
+ * Each `record` call reports how many times the identical payload has repeated
+ * for a key; once the count reaches `threshold` the result escalates so the
+ * caller can hard-stop. Any different payload, or a `reset` (call after a real
+ * change), clears the counter.
+ */
+export function createNoopTracker (threshold = 3): {
+  record: (key: string, payload: string) => NoopEscalation
+  reset: (key: string) => void
+} {
+  const state = new Map<string, { payload: string; count: number }>()
+  return {
+    record (key, payload) {
+      const prev = state.get(key)
+      const count = prev && prev.payload === payload ? prev.count + 1 : 1
+      state.set(key, { payload, count })
+      return { count, escalate: count >= threshold }
+    },
+    reset (key) {
+      state.delete(key)
+    },
+  }
+}

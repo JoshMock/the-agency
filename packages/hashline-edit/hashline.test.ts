@@ -8,6 +8,7 @@ import {
   parseTag,
   applyHashlineEdits,
   HashlineMismatchError,
+  createNoopTracker,
 } from './hashline.ts'
 
 describe('computeLineHash', () => {
@@ -250,5 +251,29 @@ describe('applyHashlineEdits', () => {
         /current content mismatch/i
       )
     })
+  })
+})
+
+describe('createNoopTracker', () => {
+  it('escalates once the same no-op payload repeats to the threshold', () => {
+    const tracker = createNoopTracker(3)
+    assert.deepEqual(tracker.record('a.ts', 'P'), { count: 1, escalate: false })
+    assert.deepEqual(tracker.record('a.ts', 'P'), { count: 2, escalate: false })
+    assert.deepEqual(tracker.record('a.ts', 'P'), { count: 3, escalate: true })
+  })
+
+  it('resets the counter when the payload changes', () => {
+    const tracker = createNoopTracker(3)
+    tracker.record('a.ts', 'P')
+    tracker.record('a.ts', 'P')
+    assert.equal(tracker.record('a.ts', 'Q').count, 1)
+  })
+
+  it('tracks paths independently and clears on reset', () => {
+    const tracker = createNoopTracker(2)
+    tracker.record('a.ts', 'P')
+    assert.equal(tracker.record('b.ts', 'P').count, 1)
+    tracker.reset('a.ts')
+    assert.equal(tracker.record('a.ts', 'P').count, 1)
   })
 })
