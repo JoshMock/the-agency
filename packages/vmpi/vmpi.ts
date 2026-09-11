@@ -2,7 +2,7 @@
 
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Command } from 'commander'
@@ -306,6 +306,15 @@ async function buildPiBundle (): Promise<Buffer> {
 
   // Clean up the install dir (keep only the cached archive)
   spawnSync('rm', ['-rf', installDir], { stdio: 'inherit' })
+
+  // Prune stale bundles (old version, old platform tag, or old pkg hash)
+  for (const file of readdirSync(cacheDir)) {
+    const filePath = join(cacheDir, file)
+    if (file.startsWith('pi-bundle-') && file.endsWith('.tgz') && filePath !== bundlePath) {
+      unlinkSync(filePath)
+      info(`Pruned stale bundle: ${file}`)
+    }
+  }
 
   info(`Bundle ready: ${bundlePath} (${(readFileSync(bundlePath).length / 1e6).toFixed(1)} MB)`)
   return readFileSync(bundlePath)
