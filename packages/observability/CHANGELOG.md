@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JoshMock/the-agency/compare/pi-observability-v0.3.0...pi-observability-v0.4.0) (2026-09-11)
+
+
+### Features
+
+* include complete system prompt in initial message ([#94](https://github.com/JoshMock/the-agency/issues/94)) ([20f2d9c](https://github.com/JoshMock/the-agency/commit/20f2d9cacf8072c213a289d991aca4fc622ff52c))
+
 ## [0.3.0](https://github.com/JoshMock/the-agency/compare/pi-observability-v0.2.1...pi-observability-v0.3.0) (2026-05-26)
 
 

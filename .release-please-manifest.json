@@ -1,7 +1,7 @@
 {
-  "packages/hashline-edit": "0.2.1",
+  "packages/hashline-edit": "0.3.0",
   "packages/tokenshrink": "0.1.2",
   "packages/spec-kit": "0.2.5",
-  "packages/vmpi": "0.4.1",
-  "packages/observability": "0.3.0"
+  "packages/vmpi": "0.4.2",
+  "packages/observability": "0.4.0"
 }

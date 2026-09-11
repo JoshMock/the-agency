@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/JoshMock/the-agency/compare/pi-hashline-edit-v0.2.1...pi-hashline-edit-v0.3.0) (2026-09-11)
+
+
+### Features
+
+* drop leading payload lines that echo preceding context ([#99](https://github.com/JoshMock/the-agency/issues/99)) ([821a557](https://github.com/JoshMock/the-agency/commit/821a557861cd88efe24b9c25a43eb0722005216a))
+* escalate on repeated no-op edits ([821a557](https://github.com/JoshMock/the-agency/commit/821a557861cd88efe24b9c25a43eb0722005216a))
+* generalize boundary-echo correction to multi-line runs ([821a557](https://github.com/JoshMock/the-agency/commit/821a557861cd88efe24b9c25a43eb0722005216a))
+
 ## [0.2.1](https://github.com/JoshMock/the-agency/compare/pi-hashline-edit-v0.2.0...pi-hashline-edit-v0.2.1) (2026-04-16)
 
 

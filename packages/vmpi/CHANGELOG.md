@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.4.2](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.1...vmpi-v0.4.2) (2026-09-11)
+
+
+### Bug Fixes
+
+* enforce minimum VMPI_MEMORY of 512 MiB ([#108](https://github.com/JoshMock/the-agency/issues/108)) ([f0a5b35](https://github.com/JoshMock/the-agency/commit/f0a5b35ce3e5edfeeda8a3e011305d9039ca8770))
+* support macOS (Apple Silicon) hosts ([#97](https://github.com/JoshMock/the-agency/issues/97)) ([462fcb6](https://github.com/JoshMock/the-agency/commit/462fcb641ed50cd00ddf96559dbc25ed054a7b58))
+* use die() for unsupported host architecture ([#106](https://github.com/JoshMock/the-agency/issues/106)) ([3fdfcf3](https://github.com/JoshMock/the-agency/commit/3fdfcf3eb0efb496dc5e4325225568330af212f0))
+
 ## [0.4.1](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.0...vmpi-v0.4.1) (2026-05-20)
 
 
