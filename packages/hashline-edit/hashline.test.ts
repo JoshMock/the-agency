@@ -183,6 +183,38 @@ describe('applyHashlineEdits', () => {
     )
   })
 
+  describe('boundary echo auto-correction', () => {
+    it('drops a leading payload line that echoes the preceding surviving line', () => {
+      const text = 'aaa\nbbb\nccc\nddd'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(2, 'bbb'),
+          end: anchorFor(3, 'ccc'),
+          lines: ['aaa', 'XXX'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nXXX\nddd')
+      assert.ok(
+        result.warnings?.some((w) => /leading line/.test(w)),
+        'emits a leading-echo warning'
+      )
+    })
+
+    it('keeps a leading line that matches content inside the range', () => {
+      const text = 'aaa\nbbb\nccc\nddd'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(2, 'bbb'),
+          end: anchorFor(3, 'ccc'),
+          lines: ['bbb', 'XXX'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nbbb\nXXX\nddd')
+    })
+  })
+
   describe('current content check', () => {
     it('succeeds when current matches the actual line', () => {
       const text = 'aaa\nbbb\nccc'

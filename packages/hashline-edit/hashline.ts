@@ -440,6 +440,24 @@ export function applyHashlineEdits (
         } else {
           const count = edit.end.line - edit.pos.line + 1
           const newLines = [...edit.lines]
+          // Leading echo: the payload starts by repeating the surviving line
+          // immediately before the range (the model re-emitted context above the
+          // edit). Drop it, but only when replacement content still remains and
+          // the echoed text is not itself the first line inside the range.
+          const leadingReplacementLine = newLines[0]?.trimEnd()
+          const prevSurvivingLine = fileLines[edit.pos.line - 2]?.trimEnd()
+          if (
+            newLines.length > 1 &&
+            leadingReplacementLine &&
+            prevSurvivingLine &&
+            leadingReplacementLine === prevSurvivingLine &&
+            fileLines[edit.pos.line - 1]?.trimEnd() !== leadingReplacementLine
+          ) {
+            newLines.shift()
+            warnings.push(
+              `Auto-corrected range replace ${edit.pos.line}#${edit.pos.hash}-${edit.end.line}#${edit.end.hash}: removed leading line that duplicated preceding surviving line`
+            )
+          }
           const trailingReplacementLine =
             newLines[newLines.length - 1]?.trimEnd()
           const nextSurvivingLine = fileLines[edit.end.line]?.trimEnd()
