@@ -253,6 +253,12 @@ export interface ResolvedConfig {
   mounts: DirectoryMount[]
 }
 
+/**
+ * Minimum safe guest RAM in MiB. Below this, the /tmp tmpfs cap (memory * 0.75)
+ * falls below the ~250 MiB the pi bundle needs to extract, causing ENOSPC.
+ */
+export const MIN_MEMORY_MB = 512
+
 /** Alpine packages always installed in the guest, regardless of user config. */
 export const DEFAULT_GUEST_PACKAGES: readonly string[] = [
   // version control
@@ -440,6 +446,12 @@ export function loadConfig (): ResolvedConfig {
   const file: VmpiConfig = result?.config ?? {}
 
   const memory = num(process.env.VMPI_MEMORY) ?? file.memory ?? 1024
+  if (memory < MIN_MEMORY_MB) {
+    throw new Error(
+      `VMPI_MEMORY must be at least ${MIN_MEMORY_MB} MiB (got ${memory}). ` +
+      `The pi bundle needs ~250 MiB of /tmp space; at this memory size the cap would be ${Math.floor(memory * 0.75)} MiB.`
+    )
+  }
   const cpus = num(process.env.VMPI_CPUS) ?? file.cpus ?? 1
   const piConfigDir = process.env.PI_CONFIG_DIR ?? file.piConfigDir ?? join(homedir(), '.pi')
   const stateDir = process.env.VMPI_STATE_DIR ?? file.stateDir ?? join(homedir(), '.vmpi')
