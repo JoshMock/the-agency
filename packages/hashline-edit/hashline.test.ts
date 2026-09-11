@@ -8,6 +8,7 @@ import {
   parseTag,
   applyHashlineEdits,
   HashlineMismatchError,
+  createNoopTracker,
 } from './hashline.ts'
 
 describe('computeLineHash', () => {
@@ -183,6 +184,64 @@ describe('applyHashlineEdits', () => {
     )
   })
 
+  describe('boundary echo auto-correction', () => {
+    it('drops a leading payload line that echoes the preceding surviving line', () => {
+      const text = 'aaa\nbbb\nccc\nddd'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(2, 'bbb'),
+          end: anchorFor(3, 'ccc'),
+          lines: ['aaa', 'XXX'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nXXX\nddd')
+      assert.ok(
+        result.warnings?.some((w) => /leading line/.test(w)),
+        'emits a leading-echo warning'
+      )
+    })
+
+    it('keeps a leading line that matches content inside the range', () => {
+      const text = 'aaa\nbbb\nccc\nddd'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(2, 'bbb'),
+          end: anchorFor(3, 'ccc'),
+          lines: ['bbb', 'XXX'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nbbb\nXXX\nddd')
+    })
+
+    it('drops multiple leading payload lines that echo preceding survivors', () => {
+      const text = 'aaa\nbbb\nccc\nddd\neee'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(3, 'ccc'),
+          end: anchorFor(4, 'ddd'),
+          lines: ['aaa', 'bbb', 'NEW'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nbbb\nNEW\neee')
+    })
+
+    it('drops leading and trailing echoes together but keeps real content', () => {
+      const text = 'aaa\nbbb\nccc\nddd\neee'
+      const result = applyHashlineEdits(text, [
+        {
+          op: 'replace',
+          pos: anchorFor(2, 'bbb'),
+          end: anchorFor(4, 'ddd'),
+          lines: ['aaa', 'MID', 'eee'],
+        },
+      ])
+      assert.equal(result.lines, 'aaa\nMID\neee')
+    })
+  })
+
   describe('current content check', () => {
     it('succeeds when current matches the actual line', () => {
       const text = 'aaa\nbbb\nccc'
@@ -218,5 +277,29 @@ describe('applyHashlineEdits', () => {
         /current content mismatch/i
       )
     })
+  })
+})
+
+describe('createNoopTracker', () => {
+  it('escalates once the same no-op payload repeats to the threshold', () => {
+    const tracker = createNoopTracker(3)
+    assert.deepEqual(tracker.record('a.ts', 'P'), { count: 1, escalate: false })
+    assert.deepEqual(tracker.record('a.ts', 'P'), { count: 2, escalate: false })
+    assert.deepEqual(tracker.record('a.ts', 'P'), { count: 3, escalate: true })
+  })
+
+  it('resets the counter when the payload changes', () => {
+    const tracker = createNoopTracker(3)
+    tracker.record('a.ts', 'P')
+    tracker.record('a.ts', 'P')
+    assert.equal(tracker.record('a.ts', 'Q').count, 1)
+  })
+
+  it('tracks paths independently and clears on reset', () => {
+    const tracker = createNoopTracker(2)
+    tracker.record('a.ts', 'P')
+    assert.equal(tracker.record('b.ts', 'P').count, 1)
+    tracker.reset('a.ts')
+    assert.equal(tracker.record('a.ts', 'P').count, 1)
   })
 })

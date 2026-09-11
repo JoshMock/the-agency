@@ -6,7 +6,9 @@ A [Pi](https://www.npmjs.com/package/@mariozechner/pi-coding-agent) extension, t
 
 This editing strategy has improved the edit success rate of Gemini models by 8%, Claude Sonnet 4.5 by 14.4%, etc. and reduced overall token usage, **without requiring any additional training to these models**.
 
-Heavily inspired by/borrowed from Can Bölük's [oh-my-pi](https://github.com/can1357/oh-my-pi) fork of Pi. I've simply extracted hashline editing from `omp` into a standalone extension, with some adjustments to ensure it can run in both Node and Bun. See Can's blog post, [I Improved 15 LLMs at Coding in One Afternoon. Only the Harness Changed](https://blog.can.ac/2026/02/12/the-harness-problem/) to understand how it works and how well it improves coding agent editing accuracy.
+Heavily inspired by/borrowed from Can Bölük's [oh-my-pi](https://github.com/can1357/oh-my-pi) fork of Pi. This is a pure JavaScript implementation of the hashline editing feature, extracted into a standalone Pi extension with adjustments for Node and Bun compatibility. See Can's blog post, [I Improved 15 LLMs at Coding in One Afternoon. Only the Harness Changed](https://blog.can.ac/2026/02/12/the-harness-problem/) to understand how hashline editing works and how it improves coding agent accuracy.
+
+**Note:** oh-my-pi's hashline edit tool has been rewritten as a Rust crate, which significantly changed the underlying implementation. This extension originally provided parity with oh-my-pi's JS-based solution, but cannot guarantee it as omp's solution continues to evolve.
 
 ## Install
 

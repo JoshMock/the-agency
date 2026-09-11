@@ -440,19 +440,55 @@ export function applyHashlineEdits (
         } else {
           const count = edit.end.line - edit.pos.line + 1
           const newLines = [...edit.lines]
-          const trailingReplacementLine =
-            newLines[newLines.length - 1]?.trimEnd()
-          const nextSurvivingLine = fileLines[edit.end.line]?.trimEnd()
-          if (
-            trailingReplacementLine &&
-            nextSurvivingLine &&
-            trailingReplacementLine === nextSurvivingLine &&
-            fileLines[edit.end.line - 1]?.trimEnd() !==
-              trailingReplacementLine
-          ) {
-            newLines.pop()
+
+          // Boundary echoes: a range replace sometimes re-emits the surviving
+          // lines just outside the range (context above and/or below the edit)
+          // as part of its payload. Detect the longest run of leading payload
+          // lines that duplicates the survivors immediately above the range,
+          // and likewise for trailing lines below it, then drop them so long as
+          // at least one genuine replacement line remains.
+          const echoRun = (payloadFrom: number, sourceFrom: number, max: number): number => {
+            for (let n = max; n >= 1; n--) {
+              let matched = true
+              let hasContent = false
+              for (let i = 0; i < n; i++) {
+                const payload = newLines[payloadFrom(n) + i]?.trimEnd()
+                const survivor = fileLines[sourceFrom(n) + i]?.trimEnd()
+                if (payload !== survivor) {
+                  matched = false
+                  break
+                }
+                if (payload) hasContent = true
+              }
+              if (matched && hasContent) return n
+            }
+            return 0
+          }
+
+          let dropLeading = echoRun(
+            () => 0,
+            (n) => edit.pos.line - 1 - n,
+            Math.min(newLines.length, edit.pos.line - 1)
+          )
+          let dropTrailing = echoRun(
+            (n) => newLines.length - n,
+            () => edit.end.line,
+            Math.min(newLines.length, fileLines.length - edit.end.line)
+          )
+          // Never strip so much that no replacement content is left.
+          while (dropLeading + dropTrailing > 0 && newLines.length - dropLeading - dropTrailing < 1) {
+            if (dropTrailing >= dropLeading) dropTrailing--
+            else dropLeading--
+          }
+          if (dropLeading > 0 || dropTrailing > 0) {
+            newLines.splice(0, dropLeading)
+            if (dropTrailing > 0) newLines.splice(newLines.length - dropTrailing, dropTrailing)
+            const removed = [
+              dropLeading > 0 ? `${dropLeading} leading` : null,
+              dropTrailing > 0 ? `${dropTrailing} trailing` : null,
+            ].filter(Boolean).join(' and ')
             warnings.push(
-              `Auto-corrected range replace ${edit.pos.line}#${edit.pos.hash}-${edit.end.line}#${edit.end.hash}: removed trailing line that duplicated next surviving line`
+              `Auto-corrected range replace ${edit.pos.line}#${edit.pos.hash}-${edit.end.line}#${edit.end.hash}: removed ${removed} line(s) that duplicated surrounding surviving lines`
             )
           }
           fileLines.splice(edit.pos.line - 1, count, ...newLines)
@@ -513,5 +549,40 @@ export function applyHashlineEdits (
     firstChangedLine,
     ...(warnings.length > 0 ? { warnings } : {}),
     ...(noopEdits.length > 0 ? { noopEdits } : {}),
+  }
+}
+
+/** Result of recording a no-op edit submission for a file. */
+export interface NoopEscalation {
+  /** Consecutive count of the identical no-op payload for this key. */
+  count: number
+  /** True once the count reaches the escalation threshold. */
+  escalate: boolean
+}
+
+/**
+ * Track repeated byte-identical no-op edits per file.
+ *
+ * An agent stuck in a loop may resubmit the same edit that changes nothing.
+ * Each `record` call reports how many times the identical payload has repeated
+ * for a key; once the count reaches `threshold` the result escalates so the
+ * caller can hard-stop. Any different payload, or a `reset` (call after a real
+ * change), clears the counter.
+ */
+export function createNoopTracker (threshold = 3): {
+  record: (key: string, payload: string) => NoopEscalation
+  reset: (key: string) => void
+} {
+  const state = new Map<string, { payload: string; count: number }>()
+  return {
+    record (key, payload) {
+      const prev = state.get(key)
+      const count = prev && prev.payload === payload ? prev.count + 1 : 1
+      state.set(key, { payload, count })
+      return { count, escalate: count >= threshold }
+    },
+    reset (key) {
+      state.delete(key)
+    },
   }
 }
