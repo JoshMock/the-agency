@@ -2,8 +2,8 @@
 
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { accessSync, constants as fsConstants, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { delimiter, join } from 'node:path'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Command } from 'commander'
 import {
@@ -17,6 +17,7 @@ import {
 } from '@earendil-works/gondolin'
 import { loadConfig, type ResolvedConfig } from './config.js'
 import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.js'
+import { findHostTool, guestNpmCpu, guestPlatformTag, npmSupportsLibc } from './host-tools.js'
 
 let _config: ResolvedConfig | undefined
 let debugMode = false
@@ -53,38 +54,6 @@ function die (message: string): never {
 /** Prints an informational message to stderr. */
 function info (message: string): void {
   console.error(`[vmpi] ${message}`)
-}
-
-/**
- * Platform-specific directories to search for host tools in addition to PATH.
- * On macOS, Homebrew's e2fsprogs formula is keg-only (not linked into
- * <prefix>/bin), so its binaries live in the keg's sbin directory.
- */
-const EXTRA_TOOL_DIRS: Record<string, string[]> = {
-  darwin: [
-    '/opt/homebrew/opt/e2fsprogs/sbin',
-    '/opt/homebrew/opt/e2fsprogs/bin',
-    '/usr/local/opt/e2fsprogs/sbin',
-    '/usr/local/opt/e2fsprogs/bin',
-  ],
-  linux: [],
-}
-
-/**
- * Resolves a host tool by name, searching PATH first, then platform-specific
- * extra directories. Returns the absolute path, or null when not found.
- */
-function findHostTool (tool: string): string | null {
-  const pathDirs = (process.env.PATH ?? '').split(delimiter).filter(d => d !== '')
-  const extraDirs = EXTRA_TOOL_DIRS[process.platform] ?? []
-  for (const dir of [...pathDirs, ...extraDirs]) {
-    const candidate = join(dir, tool)
-    try {
-      accessSync(candidate, fsConstants.X_OK)
-      return candidate
-    } catch { /* not here — keep searching */ }
-  }
-  return null
 }
 
 /** Platform-specific hint appended to messages when e2fsprogs is missing. */
@@ -217,34 +186,6 @@ async function vmExec (vm: VM, cmd: string, { forwardStdout = true }: { forwardS
 }
 
 /**
- * npm `--cpu` value matching the guest VM architecture. Gondolin runs the
- * guest at the host's architecture, so map process.arch directly.
- */
-function guestNpmCpu (): string {
-  switch (process.arch) {
-    case 'arm64': return 'arm64'
-    case 'x64': return 'x64'
-    default: throw new Error(`unsupported host architecture for building the pi bundle: ${process.arch}`)
-  }
-}
-
-let _npmSupportsLibc: boolean | undefined
-
-/**
- * Returns true when the npm on PATH supports the `--libc` flag (npm >= 10.2).
- * Older npm versions silently ignore unknown platform flags in some cases and
- * fail hard in others, so the flag is only passed when supported.
- */
-function npmSupportsLibc (): boolean {
-  if (_npmSupportsLibc == null) {
-    const res = spawnSync('npm', ['--version'], { stdio: 'pipe' })
-    const [major = 0, minor = 0] = (res.stdout?.toString().trim() ?? '0.0').split('.').map(Number)
-    _npmSupportsLibc = major > 10 || (major === 10 && minor >= 2)
-  }
-  return _npmSupportsLibc
-}
-
-/**
  * npm install flags that target the guest platform (Alpine Linux on the
  * host's CPU architecture, musl libc) instead of the host platform. Without
  * these, npm resolves platform-specific optional dependencies (napi prebuilds
@@ -256,11 +197,6 @@ function guestPlatformNpmArgs (): string[] {
   if (npmSupportsLibc()) args.push('--libc=musl')
   else info('Warning: npm < 10.2 does not support --libc — bundle may contain wrong-libc native modules')
   return args
-}
-
-/** Short platform tag used in the bundle cache filename. */
-function guestPlatformTag (): string {
-  return `linux-${guestNpmCpu()}-musl`
 }
 
 /**
