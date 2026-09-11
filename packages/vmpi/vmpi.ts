@@ -193,7 +193,13 @@ async function vmExec (vm: VM, cmd: string, { forwardStdout = true }: { forwardS
  * binaries that cannot load inside the VM.
  */
 function guestPlatformNpmArgs (): string[] {
-  const args = ['--os=linux', `--cpu=${guestNpmCpu()}`]
+  let cpu: string
+  try {
+    cpu = guestNpmCpu()
+  } catch (e) {
+    die(e instanceof Error ? e.message : `unsupported host architecture: ${process.arch}`)
+  }
+  const args = ['--os=linux', `--cpu=${cpu}`]
   if (npmSupportsLibc()) args.push('--libc=musl')
   else info('Warning: npm < 10.2 does not support --libc — bundle may contain wrong-libc native modules')
   return args
