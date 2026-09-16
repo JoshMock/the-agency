@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.2...vmpi-v0.4.3) (2026-09-16)
+
+
+### Bug Fixes
+
+* drop guest-planted symlinks during session sync ([#111](https://github.com/JoshMock/the-agency/issues/111)) ([12dc363](https://github.com/JoshMock/the-agency/commit/12dc3630d5d6d64276f4c498c0863dc2e6a0d506))
+
 ## [0.4.2](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.1...vmpi-v0.4.2) (2026-09-11)
 
 
