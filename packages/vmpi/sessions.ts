@@ -119,6 +119,7 @@ export function collectSessionsFromVm (
   mkdirSync(hostSessionDir, { recursive: true })
   for (const file of readdirSync(vmSessionDir)) {
     const src = join(vmSessionDir, file)
+    if (lstatSync(src).isSymbolicLink()) continue  // drop guest-planted symlinks; never follow them onto the host (GHSA-9266-w9qr-v52h)
     const dest = join(hostSessionDir, file)
     if (!existsSync(dest) || statSync(src).size > statSync(dest).size) {
       moveFile(src, dest)
