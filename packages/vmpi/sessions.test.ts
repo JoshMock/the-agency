@@ -254,4 +254,23 @@ describe('collectSessionsFromVm', () => {
       cleanupSnapshot()
     }
   })
+
+  it('does not follow a symlink planted inside --workspace-- (GHSA-9266-w9qr-v52h)', () => {
+    const { hostSessionDir, vmSessionDir } = sessionPaths(piDir, '/home/alice/myproject')
+    mkdirSync(hostSessionDir, { recursive: true })
+    mkdirSync(vmSessionDir, { recursive: true })
+    // A real session file that should be synced normally.
+    writeFileSync(join(vmSessionDir, 'real-session.jsonl'), 'legit content')
+    // A symlink that a guest agent could plant to exfiltrate an arbitrary host file.
+    const secretFile = join(piDir, 'secret.txt')
+    writeFileSync(secretFile, 'HOST SECRET')
+    symlinkSync(secretFile, join(vmSessionDir, 'evil-link'))
+
+    collectSessionsFromVm('/home/alice/myproject', piDir)
+
+    // The symlink must not appear in the host session dir.
+    assert.ok(!existsSync(join(hostSessionDir, 'evil-link')), 'symlink must not be copied to host')
+    // The legitimate session file should still be synced.
+    assert.ok(existsSync(join(hostSessionDir, 'real-session.jsonl')), 'real session file must be synced')
+  })
 })
