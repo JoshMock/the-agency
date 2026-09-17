@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { createHttpHooks, type HttpIpAllowInfo } from '@earendil-works/gondolin'
+import { parseStringPackages } from './packages.js'
 
 /**
  * Wraps `httpHooks.isIpAllowed` to record denied hostnames into a set.
@@ -53,5 +54,26 @@ describe('denied-host tracking', () => {
     }
 
     assert.deepEqual([...denied].sort(), ['one.example.com', 'two.example.com'])
+  })
+})
+
+describe('parseStringPackages', () => {
+  it('returns string entries unchanged', () => {
+    assert.deepEqual(parseStringPackages({ packages: ['npm:foo', 'git:bar'] }), ['npm:foo', 'git:bar'])
+  })
+
+  it('drops object-shaped entries (e.g. nono packages)', () => {
+    assert.deepEqual(
+      parseStringPackages({ packages: ['npm:foo', { source: '/some/path' }, 'git:bar'] }),
+      ['npm:foo', 'git:bar']
+    )
+  })
+
+  it('drops null and number entries', () => {
+    assert.deepEqual(parseStringPackages({ packages: [null, 42, 'npm:foo'] }), ['npm:foo'])
+  })
+
+  it('returns empty array when packages is absent', () => {
+    assert.deepEqual(parseStringPackages({}), [])
   })
 })

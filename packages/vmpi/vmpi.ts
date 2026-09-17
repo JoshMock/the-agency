@@ -18,6 +18,7 @@ import {
 import { loadConfig, type ResolvedConfig } from './config.js'
 import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.js'
 import { findHostTool, guestNpmCpu, guestPlatformTag, npmSupportsLibc } from './host-tools.js'
+import { parseStringPackages } from './packages.js'
 
 let _config: ResolvedConfig | undefined
 let debugMode = false
@@ -236,8 +237,8 @@ async function buildPiBundle (): Promise<Buffer> {
   let piPackages: string[] = []
   if (existsSync(settingsPath)) {
     try {
-      const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { packages?: string[] }
-      piPackages = settings.packages ?? []
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf8')) as { packages?: unknown[] }
+      piPackages = parseStringPackages(settings)
       const pkgs = piPackages.sort().join(',')
       pkgHash = createHash('sha1').update(pkgs).digest('hex').slice(0, 8)
     } catch { /* use default */ }
