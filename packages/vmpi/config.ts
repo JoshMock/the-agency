@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 
 const require = createRequire(import.meta.url)
 const { cosmiconfigSync } = require('cosmiconfig') as typeof import('cosmiconfig')
@@ -430,40 +430,93 @@ export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryM
 }
 
 /**
- * Loads vmpi configuration from cosmiconfig search paths and environment
- * variable overrides, returning a fully resolved config with defaults applied.
- *
- * Searches for `.vmpirc.json`, `.vmpirc.yaml`, or `.vmpirc.yml` starting from
- * the current working directory and walking up the file tree to the home
- * directory.
+ * Config keys that can expand the guest's host capabilities. These are trusted
+ * inputs and are read only from the host-owned trusted config file. Any of
+ * these declared in a project-local `.vmpirc.*` are dropped with a warning so
+ * an untrusted repository cannot influence the sandbox protecting the host.
  */
-export function loadConfig (): ResolvedConfig {
-  const explorer = cosmiconfigSync('vmpi', {
-    searchPlaces: ['.vmpirc.json', '.vmpirc.yaml', '.vmpirc.yml'],
-    searchStrategy: 'global',
-  })
-  const result = explorer.search()
-  const file: VmpiConfig = result?.config ?? {}
+export const SECURITY_FIELDS = ['network', 'mounts', 'secrets', 'piConfigDir', 'stateDir'] as const
 
-  const memory = num(process.env.VMPI_MEMORY) ?? file.memory ?? 1024
+/**
+ * Returns the default trusted config directory (`$XDG_CONFIG_HOME/vmpi` or
+ * `~/.config/vmpi`), where host-owned security-sensitive config lives.
+ */
+export function trustedConfigDir (): string {
+  // XDG spec: $XDG_CONFIG_HOME is honored only when set to a non-empty absolute
+  // path; otherwise it is ignored and ~/.config is used. Accepting an empty or
+  // relative value would resolve the trusted dir against cwd, letting an
+  // untrusted checkout supply a trusted config.
+  const xdg = process.env.XDG_CONFIG_HOME
+  const base = xdg != null && xdg !== '' && isAbsolute(xdg) ? xdg : join(homedir(), '.config')
+  return join(base, 'vmpi')
+}
+
+/**
+ * Removes security-sensitive fields from a project-local config, warning for
+ * each dropped field. Mutates and returns the same object.
+ */
+export function stripSecurityFields (project: VmpiConfig, source?: string): VmpiConfig {
+  for (const field of SECURITY_FIELDS) {
+    if (field in project) {
+      const from = source != null ? ` (from ${source})` : ''
+      console.warn(
+        `[vmpi] warning: ignoring security-sensitive field "${field}" in project config${from}. ` +
+        `Move it to the trusted config at ${join(trustedConfigDir(), 'config.json')}.`
+      )
+      delete project[field]
+    }
+  }
+  return project
+}
+
+/**
+ * Loads vmpi configuration and returns a fully resolved config with defaults
+ * applied.
+ *
+ * Security-sensitive fields (`network`, `mounts`, `secrets`, `piConfigDir`,
+ * `stateDir`) are read only from the trusted host config file
+ * (`$XDG_CONFIG_HOME/vmpi/config.{json,yaml,yml}`). Non-security preferences
+ * (`memory`, `cpus`, `rootfsExtraMb`, `guestPackages`, `postSetupHooks`) are
+ * additionally read from a project-local `.vmpirc.*` searched from the current
+ * working directory upward; any security fields it declares are dropped with a
+ * warning. Environment variable overrides are host-controlled and always apply.
+ *
+ * The `configDir` option overrides the trusted config directory and exists only
+ * to make this function unit-testable.
+ */
+export function loadConfig (opts: { configDir?: string } = {}): ResolvedConfig {
+  const trustedExplorer = cosmiconfigSync('vmpi', {
+    searchPlaces: ['config.json', 'config.yaml', 'config.yml'],
+    searchStrategy: 'none',
+  })
+  const trusted: VmpiConfig = trustedExplorer.search(opts.configDir ?? trustedConfigDir())?.config ?? {}
+
+  const projectExplorer = cosmiconfigSync('vmpi', {
+    searchPlaces: ['.vmpirc.json', '.vmpirc.yaml', '.vmpirc.yml'],
+    searchStrategy: 'project',
+  })
+  const projectResult = projectExplorer.search()
+  const project = stripSecurityFields(projectResult?.config ?? {}, projectResult?.filepath)
+
+  const memory = num(process.env.VMPI_MEMORY) ?? project.memory ?? trusted.memory ?? 1024
   if (memory < MIN_MEMORY_MB) {
     throw new Error(
       `VMPI_MEMORY must be at least ${MIN_MEMORY_MB} MiB (got ${memory}). ` +
       `The pi bundle needs ~250 MiB of /tmp space; at this memory size the cap would be ${Math.floor(memory * 0.75)} MiB.`
     )
   }
-  const cpus = num(process.env.VMPI_CPUS) ?? file.cpus ?? 1
-  const piConfigDir = process.env.PI_CONFIG_DIR ?? file.piConfigDir ?? join(homedir(), '.pi')
-  const stateDir = process.env.VMPI_STATE_DIR ?? file.stateDir ?? join(homedir(), '.vmpi')
-  const rootfsExtraMb = num(process.env.VMPI_ROOTFS_EXTRA_MB) ?? file.rootfsExtraMb ?? 128
+  const cpus = num(process.env.VMPI_CPUS) ?? project.cpus ?? trusted.cpus ?? 1
+  const piConfigDir = process.env.PI_CONFIG_DIR ?? trusted.piConfigDir ?? join(homedir(), '.pi')
+  const stateDir = process.env.VMPI_STATE_DIR ?? trusted.stateDir ?? join(homedir(), '.vmpi')
+  const rootfsExtraMb = num(process.env.VMPI_ROOTFS_EXTRA_MB) ?? project.rootfsExtraMb ?? trusted.rootfsExtraMb ?? 128
 
-  const allowedDomains = resolveAllowedDomains(file.network)
-  const policy = resolvePolicy(file.network, allowedDomains)
-  const localServices = resolveLocalServices(file.network)
-  const guestPackages = resolveGuestPackages(file.guestPackages)
-  const postSetupHooks = file.postSetupHooks ?? []
-  const { resolved: secrets, missing: missingSecrets } = resolveSecrets(file.secrets)
-  const mounts = resolveMounts(file.mounts)
+  const allowedDomains = resolveAllowedDomains(trusted.network)
+  const policy = resolvePolicy(trusted.network, allowedDomains)
+  const localServices = resolveLocalServices(trusted.network)
+  const guestPackages = resolveGuestPackages(project.guestPackages ?? trusted.guestPackages)
+  const postSetupHooks = project.postSetupHooks ?? trusted.postSetupHooks ?? []
+  const { resolved: secrets, missing: missingSecrets } = resolveSecrets(trusted.secrets)
+  const mounts = resolveMounts(trusted.mounts)
 
   if (policy === 'deny-all' && allowedDomains.length > 0) {
     throw new Error(

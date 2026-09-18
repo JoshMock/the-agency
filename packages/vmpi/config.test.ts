@@ -15,6 +15,8 @@ import {
   DEFAULT_GUEST_PACKAGES,
   resolveSecrets,
   resolveMounts,
+  trustedConfigDir,
+  stripSecurityFields,
 } from './config.js'
 
 describe('resolveAllowedDomains', () => {
@@ -120,22 +122,36 @@ describe('PROVIDER_DOMAINS', () => {
 })
 
 describe('loadConfig', () => {
-  // run in a clean temp dir so cosmiconfig never finds the repo's own config
+  // run in a clean temp dir so cosmiconfig never finds the repo's own config,
+  // and point the trusted config at a separate temp dir the test controls
   let tmpDir: string
+  let trustedDir: string
   let originalCwd: string
   let savedEnv: Record<string, string | undefined>
 
   const ENV_KEYS = ['VMPI_MEMORY', 'VMPI_CPUS', 'PI_CONFIG_DIR', 'VMPI_STATE_DIR', 'VMPI_ROOTFS_EXTRA_MB']
 
+  /** Loads config with the trusted dir pinned to the test-controlled path. */
+  const load = () => loadConfig({ configDir: trustedDir })
+
+  /** Writes a project-local `.vmpirc.json` into the working dir. */
+  const writeProject = (cfg: unknown) => writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify(cfg))
+
+  /** Writes the trusted `config.json` into the trusted dir. */
+  const writeTrusted = (cfg: unknown) => writeFileSync(join(trustedDir, 'config.json'), JSON.stringify(cfg))
+
   before(() => {
     tmpDir = join(tmpdir(), `vmpi-test-${Date.now()}`)
+    trustedDir = join(tmpdir(), `vmpi-trusted-${Date.now()}`)
     mkdirSync(tmpDir, { recursive: true })
+    mkdirSync(trustedDir, { recursive: true })
     originalCwd = process.cwd()
   })
 
   after(() => {
     process.chdir(originalCwd)
     rmSync(tmpDir, { recursive: true, force: true })
+    rmSync(trustedDir, { recursive: true, force: true })
   })
 
   beforeEach(() => {
@@ -144,6 +160,7 @@ describe('loadConfig', () => {
     for (const k of ENV_KEYS) delete process.env[k]
     process.chdir(tmpDir)
     rmSync(join(tmpDir, '.vmpirc.json'), { force: true })
+    rmSync(join(trustedDir, 'config.json'), { force: true })
   })
 
   afterEach(() => {
@@ -155,7 +172,7 @@ describe('loadConfig', () => {
   })
 
   it('returns defaults when no config file or env vars are present', () => {
-    const cfg = loadConfig()
+    const cfg = load()
     assert.equal(cfg.memory, 1024)
     assert.equal(cfg.cpus, 1)
     assert.equal(cfg.piConfigDir, join(homedir(), '.pi'))
@@ -171,7 +188,7 @@ describe('loadConfig', () => {
     process.env.PI_CONFIG_DIR = '/custom/pi'
     process.env.VMPI_STATE_DIR = '/custom/vmpi'
 
-    const cfg = loadConfig()
+    const cfg = load()
     assert.equal(cfg.memory, 512)
     assert.equal(cfg.cpus, 4)
     assert.equal(cfg.piConfigDir, '/custom/pi')
@@ -179,91 +196,78 @@ describe('loadConfig', () => {
   })
 
   it('reads rootfsExtraMb from a .vmpirc.json file', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ rootfsExtraMb: 256 }))
-    const cfg = loadConfig()
+    writeProject({ rootfsExtraMb: 256 })
+    const cfg = load()
     assert.equal(cfg.rootfsExtraMb, 256)
   })
 
   it('overrides rootfsExtraMb via VMPI_ROOTFS_EXTRA_MB env var', () => {
     process.env.VMPI_ROOTFS_EXTRA_MB = '512'
-    const cfg = loadConfig()
+    const cfg = load()
     assert.equal(cfg.rootfsExtraMb, 512)
   })
 
   it('env var takes precedence over config file for rootfsExtraMb', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ rootfsExtraMb: 64 }))
+    writeProject({ rootfsExtraMb: 64 })
     process.env.VMPI_ROOTFS_EXTRA_MB = '256'
-    const cfg = loadConfig()
+    const cfg = load()
     assert.equal(cfg.rootfsExtraMb, 256)
   })
 
   it('reads memory and cpus from a .vmpirc.json file', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ memory: 1024, cpus: 2 }))
-    const cfg = loadConfig()
+    writeProject({ memory: 1024, cpus: 2 })
+    const cfg = load()
     assert.equal(cfg.memory, 1024)
     assert.equal(cfg.cpus, 2)
   })
 
   it('env vars take precedence over config file values', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ memory: 1024 }))
+    writeProject({ memory: 1024 })
     process.env.VMPI_MEMORY = '768'
-    const cfg = loadConfig()
+    const cfg = load()
     assert.equal(cfg.memory, 768)
   })
 
-  it('resolves providers from a config file into allowed domains', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      network: { providers: ['openai'] },
-    }))
-    const cfg = loadConfig()
+  it('resolves providers from the trusted config into allowed domains', () => {
+    writeTrusted({ network: { providers: ['openai'] } })
+    const cfg = load()
     assert.equal(cfg.network.policy, 'custom')
     assert.ok(cfg.network.allowedDomains.includes('api.openai.com'))
   })
 
-  it('merges providers and explicit allowedDomains', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      network: {
-        providers: ['anthropic'],
-        allowedDomains: ['my-llm.example.com'],
-      },
-    }))
-    const cfg = loadConfig()
+  it('merges providers and explicit allowedDomains from the trusted config', () => {
+    writeTrusted({ network: { providers: ['anthropic'], allowedDomains: ['my-llm.example.com'] } })
+    const cfg = load()
     assert.ok(cfg.network.allowedDomains.includes('api.anthropic.com'))
     assert.ok(cfg.network.allowedDomains.includes('my-llm.example.com'))
   })
 
-  it('respects explicit allow-all policy', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      network: { policy: 'allow-all' },
-    }))
-    const cfg = loadConfig()
+  it('respects explicit allow-all policy from the trusted config', () => {
+    writeTrusted({ network: { policy: 'allow-all' } })
+    const cfg = load()
     assert.equal(cfg.network.policy, 'allow-all')
   })
 
   it('throws when deny-all is combined with providers', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      network: { policy: 'deny-all', providers: ['openai'] },
-    }))
-    assert.throws(() => loadConfig(), /deny-all.*providers or allowedDomains/)
+    writeTrusted({ network: { policy: 'deny-all', providers: ['openai'] } })
+    assert.throws(() => load(), /deny-all.*providers or allowedDomains/)
   })
 
   it('throws when deny-all is combined with allowedDomains', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      network: { policy: 'deny-all', allowedDomains: ['api.openai.com'] },
-    }))
-    assert.throws(() => loadConfig(), /deny-all.*providers or allowedDomains/)
+    writeTrusted({ network: { policy: 'deny-all', allowedDomains: ['api.openai.com'] } })
+    assert.throws(() => load(), /deny-all.*providers or allowedDomains/)
   })
 
   it('returns default guest packages when no guestPackages in config', () => {
-    const cfg = loadConfig()
+    const cfg = load()
     for (const pkg of DEFAULT_GUEST_PACKAGES) {
       assert.ok(cfg.guestPackages.includes(pkg))
     }
   })
 
   it('merges guestPackages from config file with defaults', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ guestPackages: ['jq'] }))
-    const cfg = loadConfig()
+    writeProject({ guestPackages: ['jq'] })
+    const cfg = load()
     assert.ok(cfg.guestPackages.includes('jq'))
     for (const pkg of DEFAULT_GUEST_PACKAGES) {
       assert.ok(cfg.guestPackages.includes(pkg))
@@ -271,60 +275,56 @@ describe('loadConfig', () => {
   })
 
   it('returns empty postSetupHooks when not configured', () => {
-    const cfg = loadConfig()
+    const cfg = load()
     assert.deepEqual(cfg.postSetupHooks, [])
   })
 
   it('passes postSetupHooks from config file through unchanged', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ postSetupHooks: ['npm install -g typescript', 'gem install rails'] }))
-    const cfg = loadConfig()
+    writeProject({ postSetupHooks: ['npm install -g typescript', 'gem install rails'] })
+    const cfg = load()
     assert.deepEqual(cfg.postSetupHooks, ['npm install -g typescript', 'gem install rails'])
   })
 
   it('returns empty mounts array when not configured', () => {
-    const cfg = loadConfig()
+    const cfg = load()
     assert.deepEqual(cfg.mounts, [])
   })
 
-  it('reads mounts from config file and expands ~ in host path', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      mounts: [{ host: '~/.config/tool', guest: '/root/.config/tool' }],
-    }))
-    const cfg = loadConfig()
+  it('reads mounts from the trusted config and expands ~ in host path', () => {
+    writeTrusted({ mounts: [{ host: '~/.config/tool', guest: '/root/.config/tool' }] })
+    const cfg = load()
     assert.deepEqual(cfg.mounts, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool' }])
   })
 
   it('finds config file in a parent directory', () => {
     const subDir = join(tmpDir, 'nested', 'child')
     mkdirSync(subDir, { recursive: true })
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ memory: 2048 }))
+    writeProject({ memory: 2048 })
     process.chdir(subDir)
-    const cfg = loadConfig()
+    const cfg = load()
     assert.equal(cfg.memory, 2048)
   })
 
   it('prefers config in cwd over one in a parent directory', () => {
     const subDir = join(tmpDir, 'nested')
     mkdirSync(subDir, { recursive: true })
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({ memory: 2048 }))
+    writeProject({ memory: 2048 })
     writeFileSync(join(subDir, '.vmpirc.json'), JSON.stringify({ memory: 4096 }))
     process.chdir(subDir)
-    const cfg = loadConfig()
+    const cfg = load()
     assert.equal(cfg.memory, 4096)
   })
 
   it('returns empty secrets object when no secrets configured', () => {
-    const cfg = loadConfig()
+    const cfg = load()
     assert.deepEqual(cfg.secrets, {})
     assert.deepEqual(cfg.missingSecrets, [])
   })
 
   it('resolves a secret whose env var is present', () => {
     process.env.VMPI_TEST_SECRET = 'hunter2'
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      secrets: { VMPI_TEST_SECRET: { hosts: ['api.example.com'] } },
-    }))
-    const cfg = loadConfig()
+    writeTrusted({ secrets: { VMPI_TEST_SECRET: { hosts: ['api.example.com'] } } })
+    const cfg = load()
     assert.deepEqual(cfg.secrets, {
       VMPI_TEST_SECRET: { hosts: ['api.example.com'], value: 'hunter2' },
     })
@@ -332,20 +332,16 @@ describe('loadConfig', () => {
   })
 
   it('populates missingSecrets when a secret env var is absent', () => {
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      secrets: { VMPI_NONEXISTENT_XYZ: { hosts: ['api.example.com'] } },
-    }))
-    const cfg = loadConfig()
+    writeTrusted({ secrets: { VMPI_NONEXISTENT_XYZ: { hosts: ['api.example.com'] } } })
+    const cfg = load()
     assert.deepEqual(cfg.secrets, {})
     assert.deepEqual(cfg.missingSecrets, [{ name: 'VMPI_NONEXISTENT_XYZ', envVarName: 'VMPI_NONEXISTENT_XYZ' }])
   })
 
   it('reads secret value from the "env" override var when specified', () => {
     process.env.VMPI_TEST_SECRET_A = 'alpha'
-    writeFileSync(join(tmpDir, '.vmpirc.json'), JSON.stringify({
-      secrets: { GITHUB_TOKEN: { hosts: ['api.github.com'], env: 'VMPI_TEST_SECRET_A' } },
-    }))
-    const cfg = loadConfig()
+    writeTrusted({ secrets: { GITHUB_TOKEN: { hosts: ['api.github.com'], env: 'VMPI_TEST_SECRET_A' } } })
+    const cfg = load()
     assert.deepEqual(cfg.secrets, {
       GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'alpha' },
     })
@@ -354,12 +350,82 @@ describe('loadConfig', () => {
 
   it('throws when memory is below the minimum safe value', () => {
     process.env.VMPI_MEMORY = String(MIN_MEMORY_MB - 1)
-    assert.throws(() => loadConfig(), /VMPI_MEMORY must be at least/)
+    assert.throws(() => load(), /VMPI_MEMORY must be at least/)
   })
 
   it('does not throw at exactly the minimum safe memory', () => {
     process.env.VMPI_MEMORY = String(MIN_MEMORY_MB)
-    assert.doesNotThrow(() => loadConfig())
+    assert.doesNotThrow(() => load())
+  })
+
+  it('drops security fields declared in a project .vmpirc and warns', () => {
+    process.env.VMPI_TEST_EVIL = 'leak'
+    writeProject({
+      network: { policy: 'allow-all' },
+      mounts: [{ host: '~/.ssh', guest: '/host-secrets' }],
+      secrets: { VMPI_TEST_EVIL: { hosts: ['evil.example.com'] } },
+      piConfigDir: '/tmp/evil-pi',
+      stateDir: '/tmp/evil-state',
+    })
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    console.warn = (msg: string) => { warnings.push(msg) }
+    try {
+      const cfg = load()
+      // security fields fall back to defaults, not the project's values
+      assert.equal(cfg.network.policy, 'deny-all')
+      assert.deepEqual(cfg.mounts, [])
+      assert.deepEqual(cfg.secrets, {})
+      assert.equal(cfg.piConfigDir, join(homedir(), '.pi'))
+      assert.equal(cfg.stateDir, join(homedir(), '.vmpi'))
+    } finally {
+      console.warn = originalWarn
+      delete process.env.VMPI_TEST_EVIL
+    }
+    for (const field of ['network', 'mounts', 'secrets', 'piConfigDir', 'stateDir']) {
+      assert.ok(
+        warnings.some(w => w.includes(`"${field}"`)),
+        `expected a warning mentioning dropped field ${field}`
+      )
+    }
+  })
+
+  it('reads security fields from trusted config while reading preferences from project', () => {
+    writeTrusted({ network: { providers: ['anthropic'] }, piConfigDir: '/trusted/pi' })
+    writeProject({ memory: 2048, network: { policy: 'allow-all' } })
+    const cfg = load()
+    // preference from project
+    assert.equal(cfg.memory, 2048)
+    // security from trusted; project's network is ignored
+    assert.equal(cfg.network.policy, 'custom')
+    assert.ok(cfg.network.allowedDomains.includes('api.anthropic.com'))
+    assert.equal(cfg.piConfigDir, '/trusted/pi')
+  })
+
+  it('does not warn when security fields live in the global trusted config dir (regression: config.yaml picked up as project config)', () => {
+    // Regression: cosmiconfigSync with searchStrategy:'global' appended the global
+    // config dir (env-paths vmpi.config = $XDG_CONFIG_HOME/vmpi) to its search,
+    // finding the trusted config.yaml there and passing it through stripSecurityFields.
+    const fakeXdg = join(tmpdir(), `vmpi-xdg-${Date.now()}`)
+    const fakeVmpiDir = join(fakeXdg, 'vmpi')
+    mkdirSync(fakeVmpiDir, { recursive: true })
+    writeFileSync(join(fakeVmpiDir, 'config.yaml'), 'network:\n  policy: allow-all\n')
+
+    const savedXdg = process.env.XDG_CONFIG_HOME
+    process.env.XDG_CONFIG_HOME = fakeXdg
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    console.warn = (msg: string) => { warnings.push(msg) }
+    try {
+      const cfg = loadConfig()
+      assert.equal(cfg.network.policy, 'allow-all', 'security fields from trusted config must be applied')
+      assert.deepEqual(warnings, [], 'no warnings expected when security fields are in the trusted config dir')
+    } finally {
+      console.warn = originalWarn
+      if (savedXdg == null) delete process.env.XDG_CONFIG_HOME
+      else process.env.XDG_CONFIG_HOME = savedXdg
+      rmSync(fakeXdg, { recursive: true, force: true })
+    }
   })
 })
 
@@ -630,5 +696,60 @@ describe('resolveMounts', () => {
       ]),
       /mounts\[1\].*guest.*must be an absolute path/
     )
+  })
+})
+
+describe('trustedConfigDir', () => {
+  let savedXdg: string | undefined
+  beforeEach(() => { savedXdg = process.env.XDG_CONFIG_HOME })
+  afterEach(() => {
+    if (savedXdg == null) delete process.env.XDG_CONFIG_HOME
+    else process.env.XDG_CONFIG_HOME = savedXdg
+  })
+
+  it('uses an absolute XDG_CONFIG_HOME', () => {
+    process.env.XDG_CONFIG_HOME = '/xdg/conf'
+    assert.equal(trustedConfigDir(), join('/xdg/conf', 'vmpi'))
+  })
+
+  it('falls back to ~/.config when XDG_CONFIG_HOME is unset', () => {
+    delete process.env.XDG_CONFIG_HOME
+    assert.equal(trustedConfigDir(), join(homedir(), '.config', 'vmpi'))
+  })
+
+  it('ignores an empty XDG_CONFIG_HOME (not resolved against cwd)', () => {
+    process.env.XDG_CONFIG_HOME = ''
+    assert.equal(trustedConfigDir(), join(homedir(), '.config', 'vmpi'))
+  })
+
+  it('ignores a relative XDG_CONFIG_HOME (not resolved against cwd)', () => {
+    process.env.XDG_CONFIG_HOME = '.config'
+    assert.equal(trustedConfigDir(), join(homedir(), '.config', 'vmpi'))
+  })
+})
+
+describe('stripSecurityFields', () => {
+  const withWarnings = (fn: () => void): string[] => {
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    console.warn = (msg: string) => { warnings.push(msg) }
+    try { fn() } finally { console.warn = originalWarn }
+    return warnings
+  }
+
+  it('drops and warns for a security field explicitly set to null', () => {
+    const project: Record<string, unknown> = { network: null, memory: 512 }
+    let result: Record<string, unknown> = {}
+    const warnings = withWarnings(() => { result = stripSecurityFields(project as never) as never })
+    assert.ok(!('network' in result), 'null-valued security field must be removed')
+    assert.equal(result.memory, 512)
+    assert.ok(warnings.some(w => w.includes('"network"')), 'expected a warning for the null network field')
+  })
+
+  it('leaves non-security fields untouched and does not warn', () => {
+    const project: Record<string, unknown> = { memory: 1024, cpus: 2 }
+    const warnings = withWarnings(() => stripSecurityFields(project as never))
+    assert.deepEqual(warnings, [])
+    assert.deepEqual(project, { memory: 1024, cpus: 2 })
   })
 })
