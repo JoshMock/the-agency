@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.4](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.3...vmpi-v0.4.4) (2026-09-18)
+
+
+### Bug Fixes
+
+* drop non-string entries from settings.packages before treating the rest as strings ([#121](https://github.com/JoshMock/the-agency/issues/121)) ([0280b93](https://github.com/JoshMock/the-agency/commit/0280b93a40c8b71249f42031248f8f6a58b899ee))
+* project config explorer must not search global dirs ([#123](https://github.com/JoshMock/the-agency/issues/123)) ([ca86817](https://github.com/JoshMock/the-agency/commit/ca868177f9bf64b8a04c79301a517a4d3df19cd5))
+
 ## [0.4.3](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.2...vmpi-v0.4.3) (2026-09-16)
 
 
