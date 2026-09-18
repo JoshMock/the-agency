@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.4...vmpi-v0.5.0) (2026-09-18)
+
+
+### Features
+
+* auto-broker provider API keys through Gondolin when provider is configured ([#126](https://github.com/JoshMock/the-agency/issues/126)) ([3dea8b5](https://github.com/JoshMock/the-agency/commit/3dea8b545dead1977d62bae1147376c068c46e50))
+
+
+### Bug Fixes
+
+* exclude auth.json and trust.json from VM pi config snapshot ([#124](https://github.com/JoshMock/the-agency/issues/124)) ([29f966c](https://github.com/JoshMock/the-agency/commit/29f966c0ae32c12381772db5a1d144e8ded4c732))
+
 ## [0.4.4](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.3...vmpi-v0.4.4) (2026-09-18)
 
 
