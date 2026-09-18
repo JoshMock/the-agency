@@ -15,7 +15,7 @@ import {
   type DebugComponent,
   type HttpIpAllowInfo,
 } from '@earendil-works/gondolin'
-import { loadConfig, type ResolvedConfig } from './config.js'
+import { loadConfig, trustedConfigDir, type ResolvedConfig } from './config.js'
 import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.js'
 import { findHostTool, guestNpmCpu, guestPlatformTag, npmSupportsLibc } from './host-tools.js'
 import { parseStringPackages } from './packages.js'
@@ -651,10 +651,8 @@ async function cmdRun (args: string[]): Promise<void> {
 }
 
 const CONFIG_HELP = `
-Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
+Trusted config (${join(trustedConfigDir(), 'config.{json,yaml,yml}')}, override dir with $XDG_CONFIG_HOME) — host-owned, security-sensitive:
 
-  memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 1024)
-  cpus            vCPU count                  (env: VMPI_CPUS,      default: 1)
   piConfigDir     pi config dir on host       (env: PI_CONFIG_DIR,  default: ~/.pi)
   stateDir        vmpi state dir on host      (env: VMPI_STATE_DIR, default: ~/.vmpi)
   network.policy                allow-all | deny-all | custom (inferred when providers/domains set)
@@ -671,12 +669,22 @@ Configuration (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml):
                                 Each entry maps a host path to an absolute guest path.
                                   [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
 
-Example .vmpirc.json (using the gh CLI with a GitHub token):
+Project config (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml) — non-security preferences only:
+
+  memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 1024)
+  cpus            vCPU count                  (env: VMPI_CPUS,      default: 1)
+  rootfsExtraMb   extra rootfs MiB at setup   (env: VMPI_ROOTFS_EXTRA_MB, default: 128)
+  guestPackages   extra Alpine packages to install in the guest
+  postSetupHooks  shell commands run in the guest after package install
+
+Security-sensitive fields declared in a project .vmpirc are ignored (with a warning);
+an untrusted repository cannot expand the guest's host capabilities.
+
+Example ~/.config/vmpi/config.json (using the gh CLI with a GitHub token):
   {
     "network": {
       "providers": ["anthropic", "github"]
     },
-    "guestPackages": ["github-cli"],
     "secrets": {
       "GITHUB_TOKEN": { "hosts": ["api.github.com", "github.com"] }
     }

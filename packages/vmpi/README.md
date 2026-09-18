@@ -98,19 +98,34 @@ Every `vmpi` invocation:
 
 ## Configuration
 
-vmpi can be configured with a config file.
-It searches for configuration files from your current directory up to the root directory with one of the following names:
+vmpi reads configuration from two separate sources with different trust levels.
+
+**Trusted config** (host-owned) holds all security-sensitive settings and is read only from:
+
+- `~/.config/vmpi/config.json`
+- `~/.config/vmpi/config.yaml`
+- `~/.config/vmpi/config.yml`
+
+(`~/.config` follows `$XDG_CONFIG_HOME` when set.)
+
+**Project config** holds non-security preferences only. It is searched from your current
+directory up to the root directory with one of the following names:
 
 - `.vmpirc.json`
 - `.vmpirc.yaml`
 - `.vmpirc.yml`
 
-### Example `.vmpirc.json`
+Security-sensitive fields (`network`, `mounts`, `secrets`, `piConfigDir`, `stateDir`) are
+read **only** from the trusted config. If a project `.vmpirc.*` declares any of them, they
+are ignored and a warning is printed. This ensures an untrusted repository cannot expand the
+guest's host capabilities. The remaining fields (`memory`, `cpus`, `rootfsExtraMb`,
+`guestPackages`, `postSetupHooks`) may be set per project; when set in both, the project value
+wins for these preferences.
+
+### Example trusted `~/.config/vmpi/config.json`
 
 ```json
 {
-  "memory": 1024,
-  "cpus": 2,
   "network": {
     "providers": ["github-copilot", "anthropic"],
     "allowedDomains": ["my-custom-llm.example.com"],
@@ -119,38 +134,49 @@ It searches for configuration files from your current directory up to the root d
 }
 ```
 
-To use the `gh` CLI inside the sandbox, add the `github` network preset and forward your token:
+To use the `gh` CLI inside the sandbox, add the `github` network preset and forward your token in the trusted config:
 
 ```json
 {
   "network": {
     "providers": ["anthropic", "github"]
   },
-  "guestPackages": ["github-cli"],
-  "postSetupHooks": ["npm install -g typescript"],
   "secrets": {
     "GITHUB_TOKEN": { "hosts": ["api.github.com", "github.com"] }
   }
 }
 ```
 
+### Example project `.vmpirc.json`
+
+```json
+{
+  "memory": 1024,
+  "cpus": 2,
+  "guestPackages": ["github-cli"],
+  "postSetupHooks": ["npm install -g typescript"]
+}
+```
+
 ### Options
 
-| Key | Default | Description |
-|---|---|---|
-| `memory` | `1024` | RAM in MiB |
-| `cpus` | `1` | vCPU count |
-| `piConfigDir` | `~/.pi` | Path to the pi config directory on the host |
-| `stateDir` | `~/.vmpi` | Where vmpi stores the base checkpoint and tarball cache |
-| `network.policy` | inferred | `"allow-all"`, `"deny-all"`, or `"custom"`. Auto-set to `"custom"` when providers/domains are configured |
-| `network.providers` | `[]` | LLM provider names to allow (see below) |
-| `network.allowedDomains` | `[]` | Additional external domain patterns to allow |
-| `network.localServices` | `[]` | Host services to expose inside the VM. Each entry is `{ hostname, port }`. The VM can reach `hostname` at the given host `port` via a raw TCP tunnel. |
-| `rootfsExtraMb` | `128` | MiB to add to the Gondolin rootfs image during `vmpi setup` when free space is below this threshold. Increase this if setup fails with a disk-full error. |
-| `guestPackages` | `[]` | Extra Alpine packages to install in the guest during `vmpi setup`, in addition to the defaults: `git`, `fd`, `ripgrep`, `curl`, `jq`, `bash`, `python3`, `py3-pip`, `nodejs`, `npm`, `make`, `patch`, `file`, `sqlite`. |
-| `postSetupHooks` | `[]` | Shell commands to run inside the VM after packages are installed, before the checkpoint is saved. Each command runs via `/bin/sh -c`. A non-zero exit aborts setup. Use this to install tools not available as Alpine packages, e.g. `npm install -g typescript` or `gem install rails`. |
-| `mounts` | `[]` | Host directories to mount into the VM at runtime. Each entry is `{ "host": "...", "guest": "..." }`. The `host` path supports a leading `~`. Example: `[{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]`. |
-| `secrets` | `{}` | Secrets to inject into the VM, each scoped to specific hosts using [Gondolin's secret handling](https://earendil-works.github.io/gondolin/secrets/). Each key is the guest env var name. Value: `{ "hosts": ["api.github.com"] }`. Override the host-side var name with `"env"`: `{ "hosts": [...], "env": "MY_PAT" }`. Values are passed via a tmpfs env file and never written to persistent storage. |
+Source is `trusted` (`~/.config/vmpi/config.*`) or `project` (`.vmpirc.*`). `trusted` keys are security-sensitive and ignored if declared in a project config.
+
+| Key | Source | Default | Description |
+|---|---|---|---|
+| `memory` | project | `1024` | RAM in MiB |
+| `cpus` | project | `1` | vCPU count |
+| `rootfsExtraMb` | project | `128` | MiB to add to the Gondolin rootfs image during `vmpi setup` when free space is below this threshold. Increase this if setup fails with a disk-full error. |
+| `guestPackages` | project | `[]` | Extra Alpine packages to install in the guest during `vmpi setup`, in addition to the defaults: `git`, `fd`, `ripgrep`, `curl`, `jq`, `bash`, `python3`, `py3-pip`, `nodejs`, `npm`, `make`, `patch`, `file`, `sqlite`. |
+| `postSetupHooks` | project | `[]` | Shell commands to run inside the VM after packages are installed, before the checkpoint is saved. Each command runs via `/bin/sh -c`. A non-zero exit aborts setup. Use this to install tools not available as Alpine packages, e.g. `npm install -g typescript` or `gem install rails`. |
+| `piConfigDir` | trusted | `~/.pi` | Path to the pi config directory on the host |
+| `stateDir` | trusted | `~/.vmpi` | Where vmpi stores the base checkpoint and tarball cache |
+| `network.policy` | trusted | inferred | `"allow-all"`, `"deny-all"`, or `"custom"`. Auto-set to `"custom"` when providers/domains are configured |
+| `network.providers` | trusted | `[]` | LLM provider names to allow (see below) |
+| `network.allowedDomains` | trusted | `[]` | Additional external domain patterns to allow |
+| `network.localServices` | trusted | `[]` | Host services to expose inside the VM. Each entry is `{ hostname, port }`. The VM can reach `hostname` at the given host `port` via a raw TCP tunnel. |
+| `mounts` | trusted | `[]` | Host directories to mount into the VM at runtime. Each entry is `{ "host": "...", "guest": "..." }`. The `host` path supports a leading `~`. Example: `[{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]`. |
+| `secrets` | trusted | `{}` | Secrets to inject into the VM, each scoped to specific hosts using [Gondolin's secret handling](https://earendil-works.github.io/gondolin/secrets/). Each key is the guest env var name. Value: `{ "hosts": ["api.github.com"] }`. Override the host-side var name with `"env"`: `{ "hosts": [...], "env": "MY_PAT" }`. Values are passed via a tmpfs env file and never written to persistent storage. |
 Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_DIR`, `VMPI_ROOTFS_EXTRA_MB`) override their config file equivalents.
 
 ### Built-in providers
