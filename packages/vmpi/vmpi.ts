@@ -2,8 +2,9 @@
 
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Command } from 'commander'
 import {
@@ -19,6 +20,18 @@ import { loadConfig, trustedConfigDir, type ResolvedConfig } from './config.js'
 import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.js'
 import { findHostTool, guestNpmCpu, guestPlatformTag, npmSupportsLibc } from './host-tools.js'
 import { parseStringPackages } from './packages.js'
+
+/** Files that must never be copied into the guest pi-config snapshot. */
+export const SNAPSHOT_DENIED = new Set(['agent/auth.json', 'agent/trust.json'])
+
+/**
+ * cpSync filter predicate: returns false for any src whose path relative to
+ * piConfigDir matches a denied file, true otherwise.
+ * @param piConfigDir - absolute path to the source pi config directory
+ * @param src - absolute path being evaluated by cpSync
+ */
+export const snapshotFilter = (piConfigDir: string, src: string): boolean =>
+  !SNAPSHOT_DENIED.has(relative(piConfigDir, src))
 
 let _config: ResolvedConfig | undefined
 let debugMode = false
@@ -525,7 +538,12 @@ async function cmdRun (args: string[]): Promise<void> {
   const cleanupSnapshot = () => {
     try { rmSync(piConfigSnapshotDir, { recursive: true, force: true }) } catch { /* ignore */ }
   }
-  cpSync(piConfigDir, piConfigSnapshotDir, { recursive: true, preserveTimestamps: true })
+  // Excluded: credential-bearing files that must never enter the guest.
+  cpSync(piConfigDir, piConfigSnapshotDir, {
+    recursive: true,
+    preserveTimestamps: true,
+    filter: (src) => snapshotFilter(piConfigDir, src),
+  })
 
   info('Resuming sandbox VM from checkpoint...')
   const checkpoint = VmCheckpoint.load(checkpointFile())
@@ -722,7 +740,23 @@ program
     cmdStatus()
   })
 
-program.parseAsync(process.argv).catch(error => {
-  if (error instanceof Error) die(error.message)
-  else die('An unknown error occurred')
-})
+/**
+ * True when this module is the process entry point. Resolves symlinks in
+ * process.argv[1] (npm installs the bin as a symlink) so the check matches the
+ * canonical import.meta.url path.
+ */
+const isMainModule = (): boolean => {
+  try {
+    return fileURLToPath(import.meta.url) === realpathSync(process.argv[1])
+  } catch {
+    return false
+  }
+}
+
+// Only run the CLI when this file is the direct entry point, not when imported as a module.
+if (isMainModule()) {
+  program.parseAsync(process.argv).catch(error => {
+    if (error instanceof Error) die(error.message)
+    else die('An unknown error occurred')
+  })
+}
