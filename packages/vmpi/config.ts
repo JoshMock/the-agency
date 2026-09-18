@@ -44,6 +44,19 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
   ],
 }
 
+/**
+ * Maps provider names to the host environment variable that holds the API key.
+ * Providers without a key-based credential (ollama, llama.cpp) are omitted.
+ */
+export const PROVIDER_API_KEY_ENV: Record<string, string> = {
+  'github-copilot': 'GITHUB_TOKEN',
+  gemini: 'GEMINI_API_KEY',
+  openai: 'OPENAI_API_KEY',
+  anthropic: 'ANTHROPIC_API_KEY',
+  github: 'GITHUB_TOKEN',
+  openrouter: 'OPENROUTER_API_KEY',
+}
+
 /** A single host-to-local-port mapping for the `localServices` config option. */
 interface LocalService {
   /**
@@ -338,6 +351,31 @@ export function resolveSecrets (
 }
 
 /**
+ * Builds a `SecretsConfig` from the configured providers, auto-scoping each
+ * provider's API-key env var to that provider's allowed domains. Providers
+ * without a key-based credential (ollama, llama.cpp) are skipped.
+ *
+ * When multiple providers share an env var (e.g. github and github-copilot
+ * both use GITHUB_TOKEN), their domain sets are unioned.
+ */
+export function buildProviderSecretsConfig (providers: string[] | undefined): SecretsConfig {
+  const envVarDomains = new Map<string, Set<string>>()
+  for (const provider of providers ?? []) {
+    const envVar = PROVIDER_API_KEY_ENV[provider]
+    if (envVar == null) continue
+    const domains = PROVIDER_DOMAINS[provider]
+    if (domains == null) continue
+    if (!envVarDomains.has(envVar)) envVarDomains.set(envVar, new Set())
+    for (const d of domains) envVarDomains.get(envVar)!.add(d)
+  }
+  const result: SecretsConfig = {}
+  for (const [envVar, domains] of envVarDomains) {
+    result[envVar] = { hosts: [...domains] }
+  }
+  return result
+}
+
+/**
  * Resolves the effective allowed-domain list from providers and explicit domains.
  */
 export function resolveAllowedDomains (network: NetworkConfig | undefined): string[] {
@@ -515,7 +553,10 @@ export function loadConfig (opts: { configDir?: string } = {}): ResolvedConfig {
   const localServices = resolveLocalServices(trusted.network)
   const guestPackages = resolveGuestPackages(project.guestPackages ?? trusted.guestPackages)
   const postSetupHooks = project.postSetupHooks ?? trusted.postSetupHooks ?? []
-  const { resolved: secrets, missing: missingSecrets } = resolveSecrets(trusted.secrets)
+  const autoProviderSecrets = buildProviderSecretsConfig(trusted.network?.providers)
+  // User-declared secrets win on key conflicts.
+  const mergedSecrets = { ...autoProviderSecrets, ...(trusted.secrets ?? {}) }
+  const { resolved: secrets, missing: missingSecrets } = resolveSecrets(mergedSecrets)
   const mounts = resolveMounts(trusted.mounts)
 
   if (policy === 'deny-all' && allowedDomains.length > 0) {

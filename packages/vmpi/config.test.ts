@@ -6,6 +6,7 @@ import { join } from 'node:path'
 
 import {
   PROVIDER_DOMAINS,
+  PROVIDER_API_KEY_ENV,
   MIN_MEMORY_MB,
   resolveAllowedDomains,
   resolvePolicy,
@@ -14,6 +15,7 @@ import {
   resolveGuestPackages,
   DEFAULT_GUEST_PACKAGES,
   resolveSecrets,
+  buildProviderSecretsConfig,
   resolveMounts,
   trustedConfigDir,
   stripSecurityFields,
@@ -118,6 +120,78 @@ describe('PROVIDER_DOMAINS', () => {
     for (const [provider, domains] of Object.entries(PROVIDER_DOMAINS)) {
       assert.ok(domains.length > 0, `${provider} has no domains`)
     }
+  })
+})
+
+describe('PROVIDER_API_KEY_ENV', () => {
+  it('maps openai to OPENAI_API_KEY', () => {
+    assert.equal(PROVIDER_API_KEY_ENV.openai, 'OPENAI_API_KEY')
+  })
+
+  it('maps anthropic to ANTHROPIC_API_KEY', () => {
+    assert.equal(PROVIDER_API_KEY_ENV.anthropic, 'ANTHROPIC_API_KEY')
+  })
+
+  it('maps gemini to GEMINI_API_KEY', () => {
+    assert.equal(PROVIDER_API_KEY_ENV.gemini, 'GEMINI_API_KEY')
+  })
+
+  it('maps openrouter to OPENROUTER_API_KEY', () => {
+    assert.equal(PROVIDER_API_KEY_ENV.openrouter, 'OPENROUTER_API_KEY')
+  })
+
+  it('maps github and github-copilot to GITHUB_TOKEN', () => {
+    assert.equal(PROVIDER_API_KEY_ENV.github, 'GITHUB_TOKEN')
+    assert.equal(PROVIDER_API_KEY_ENV['github-copilot'], 'GITHUB_TOKEN')
+  })
+
+  it('omits ollama (no API key)', () => {
+    assert.ok(!('ollama' in PROVIDER_API_KEY_ENV))
+  })
+
+  it('omits llama.cpp (no API key)', () => {
+    assert.ok(!('llama.cpp' in PROVIDER_API_KEY_ENV))
+  })
+})
+
+describe('buildProviderSecretsConfig', () => {
+  it('returns empty object for no providers', () => {
+    assert.deepEqual(buildProviderSecretsConfig(undefined), {})
+  })
+
+  it('returns empty object for providers without API keys', () => {
+    assert.deepEqual(buildProviderSecretsConfig(['ollama', 'llama.cpp']), {})
+  })
+
+  it('generates a secret entry for openai scoped to its domains', () => {
+    const result = buildProviderSecretsConfig(['openai'])
+    assert.deepEqual(result, {
+      OPENAI_API_KEY: { hosts: [...PROVIDER_DOMAINS.openai] },
+    })
+  })
+
+  it('generates separate entries for providers with different env vars', () => {
+    const result = buildProviderSecretsConfig(['openai', 'anthropic'])
+    assert.deepEqual(result.OPENAI_API_KEY?.hosts, [...PROVIDER_DOMAINS.openai])
+    assert.deepEqual(result.ANTHROPIC_API_KEY?.hosts, [...PROVIDER_DOMAINS.anthropic])
+  })
+
+  it('merges domains when two providers share an env var', () => {
+    const result = buildProviderSecretsConfig(['github', 'github-copilot'])
+    const entry = result.GITHUB_TOKEN
+    assert.ok(entry != null, 'GITHUB_TOKEN entry should exist')
+    for (const d of PROVIDER_DOMAINS.github) {
+      assert.ok(entry.hosts.includes(d), `missing github domain: ${d}`)
+    }
+    for (const d of PROVIDER_DOMAINS['github-copilot']) {
+      assert.ok(entry.hosts.includes(d), `missing github-copilot domain: ${d}`)
+    }
+  })
+
+  it('skips providers with no entry in PROVIDER_API_KEY_ENV', () => {
+    const result = buildProviderSecretsConfig(['ollama', 'openai'])
+    assert.ok(!('ollama' in result))
+    assert.ok('OPENAI_API_KEY' in result)
   })
 })
 
@@ -346,6 +420,58 @@ describe('loadConfig', () => {
       GITHUB_TOKEN: { hosts: ['api.github.com'], value: 'alpha' },
     })
     delete process.env.VMPI_TEST_SECRET_A
+  })
+
+  it('auto-brokers provider API key when provider is configured and env var is set', () => {
+    process.env.OPENAI_API_KEY = 'sk-test'
+    writeTrusted({ network: { providers: ['openai'] } })
+    const cfg = load()
+    assert.deepEqual(cfg.secrets.OPENAI_API_KEY, {
+      hosts: [...PROVIDER_DOMAINS.openai],
+      value: 'sk-test',
+    })
+    delete process.env.OPENAI_API_KEY
+  })
+
+  it('reports auto-brokered provider key as missing when env var is absent', () => {
+    writeTrusted({ network: { providers: ['anthropic'] } })
+    const cfg = load()
+    assert.deepEqual(cfg.secrets.ANTHROPIC_API_KEY, undefined)
+    assert.ok(cfg.missingSecrets.some(m => m.name === 'ANTHROPIC_API_KEY'))
+  })
+
+  it('user-declared secret wins over auto-brokered provider secret on the same key', () => {
+    process.env.OPENAI_API_KEY = 'sk-real'
+    // User declares a narrower host scope
+    writeTrusted({
+      network: { providers: ['openai'] },
+      secrets: { OPENAI_API_KEY: { hosts: ['api.openai.com', 'custom.example.com'] } },
+    })
+    const cfg = load()
+    assert.deepEqual(cfg.secrets.OPENAI_API_KEY?.hosts, ['api.openai.com', 'custom.example.com'])
+    delete process.env.OPENAI_API_KEY
+  })
+
+  it('auto-brokers do not appear when network has no providers', () => {
+    process.env.OPENAI_API_KEY = 'sk-test'
+    const cfg = load()
+    assert.equal(cfg.secrets.OPENAI_API_KEY, undefined)
+    delete process.env.OPENAI_API_KEY
+  })
+
+  it('merges auto-brokered domains for github and github-copilot into one GITHUB_TOKEN entry', () => {
+    process.env.GITHUB_TOKEN = 'ghp_test'
+    writeTrusted({ network: { providers: ['github', 'github-copilot'] } })
+    const cfg = load()
+    const entry = cfg.secrets.GITHUB_TOKEN
+    assert.ok(entry != null)
+    for (const d of PROVIDER_DOMAINS.github) {
+      assert.ok(entry.hosts.includes(d), `missing github domain: ${d}`)
+    }
+    for (const d of PROVIDER_DOMAINS['github-copilot']) {
+      assert.ok(entry.hosts.includes(d), `missing github-copilot domain: ${d}`)
+    }
+    delete process.env.GITHUB_TOKEN
   })
 
   it('throws when memory is below the minimum safe value', () => {
