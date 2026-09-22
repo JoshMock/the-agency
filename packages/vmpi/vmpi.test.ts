@@ -5,7 +5,7 @@ import { parseStringPackages } from './packages.js'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SNAPSHOT_DENIED, snapshotFilter } from './vmpi.js'
+import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks } from './vmpi.js'
 
 /**
  * Wraps `httpHooks.isIpAllowed` to record denied hostnames into a set.
@@ -128,5 +128,33 @@ describe('SNAPSHOT_DENIED + snapshotFilter', () => {
       rmSync(src, { recursive: true, force: true })
       rmSync(dst, { recursive: true, force: true })
     }
+  })
+})
+
+describe('buildHttpHooks', () => {
+  const noSecrets: Record<string, never> = {}
+  const oneSecret = {
+    MY_KEY: { value: 'real-secret-value', hosts: ['api.example.com'], placeholder: 'placeholder-value' },
+  }
+  const allowAll = { policy: 'allow-all' as const, allowedDomains: [], localServices: [] }
+  const denyAll = { policy: 'deny-all' as const, allowedDomains: [], localServices: [] }
+
+  it('allow-all with no secrets returns no hooks and empty env', () => {
+    const { httpHooks, guestEnv } = buildHttpHooks(noSecrets, allowAll)
+    assert.equal(httpHooks, undefined)
+    assert.deepEqual(guestEnv, {})
+  })
+
+  it('allow-all with secrets returns hooks (secret mediation active)', () => {
+    const { httpHooks, guestEnv } = buildHttpHooks(oneSecret, allowAll)
+    assert.ok(httpHooks != null, 'httpHooks should be present so secrets are mediated')
+    assert.notEqual(guestEnv['MY_KEY'], 'real-secret-value', 'raw secret value must not be exposed to guest')
+    assert.ok(typeof guestEnv['MY_KEY'] === 'string' && guestEnv['MY_KEY'].length > 0, 'placeholder must be set')
+  })
+
+  it('deny-all with secrets returns hooks', () => {
+    const { httpHooks, guestEnv } = buildHttpHooks(oneSecret, denyAll)
+    assert.ok(httpHooks != null)
+    assert.notEqual(guestEnv['MY_KEY'], 'real-secret-value')
   })
 })

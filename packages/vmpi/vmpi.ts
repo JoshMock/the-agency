@@ -342,13 +342,18 @@ async function buildPiBundle (): Promise<Buffer> {
  * the proxy injects the value only on requests to those hosts, and the returned
  * `env` object contains the env vars to set inside the VM guest.
  *
- * For `allow-all` policy no hooks are created (unrestricted egress). Secrets
- * are still resolved so their `env` values reach the guest.
+ * For `allow-all` policy, hooks are still created when secrets are configured so
+ * that placeholder mediation is retained — guests never receive raw secret values.
+ * Omitting `allowedHosts` in Gondolin's options means "allow all hosts".
+ *
+ * @param secrets - resolved secret entries keyed by guest env var name
+ * @param network - resolved network config (defaults to loaded config if omitted)
  */
-function buildHttpHooks (
-  secrets: Record<string, import('./config.js').ResolvedSecretEntry>
+export function buildHttpHooks (
+  secrets: Record<string, import('./config.js').ResolvedSecretEntry>,
+  network?: import('./config.js').ResolvedNetwork
 ): { httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'] | undefined; guestEnv: Record<string, string> } {
-  const { policy, allowedDomains, localServices } = getConfig().network
+  const { policy, allowedDomains, localServices } = network ?? getConfig().network
   const internalHostnames = localServices.map(s => s.hostname)
   // We cast to `any` because the Gondolin type for `secrets` is not re-exported.
   const gondolinSecrets: any = secrets
@@ -356,9 +361,11 @@ function buildHttpHooks (
 
   if (policy === 'allow-all') {
     info('Network policy: allow-all (unrestricted)')
-    // No httpHooks, but still expose the env vars in the guest.
-    const guestEnv = Object.fromEntries(Object.entries(secrets).map(([k, { value }]) => [k, value]))
-    return { httpHooks: undefined, guestEnv }
+    if (!hasSecrets) return { httpHooks: undefined, guestEnv: {} }
+    // Omitting allowedHosts = allow all hosts, but secrets are still mediated
+    // via the proxy so guests receive placeholders, not raw secret values.
+    const { httpHooks, env } = createHttpHooks({ secrets: gondolinSecrets })
+    return { httpHooks, guestEnv: (env ?? {}) as Record<string, string> }
   }
 
   const baseOpts: Record<string, unknown> = {
