@@ -11,6 +11,7 @@ import {
   VM,
   VmCheckpoint,
   RealFSProvider,
+  ReadonlyProvider,
   createHttpHooks,
   type VMOptions,
   type DebugComponent,
@@ -552,10 +553,17 @@ async function cmdRun (args: string[]): Promise<void> {
     filter: (src) => snapshotFilter(piConfigDir, src),
   })
 
+  if (mounts.length > 0) {
+    info('Mounts:')
+    for (const m of mounts) info(`  ${m.host} -> ${m.guest} [${m.readonly ? 'ro' : 'rw'}]`)
+  }
   info('Resuming sandbox VM from checkpoint...')
   const checkpoint = VmCheckpoint.load(checkpointFile())
   const userMountProviders = Object.fromEntries(
-    mounts.map(m => [m.guest, new RealFSProvider(m.host)])
+    mounts.map(m => {
+      const provider = new RealFSProvider(m.host)
+      return [m.guest, m.readonly ? new ReadonlyProvider(provider) : provider]
+    })
   )
   const vm = await checkpoint.resume({
     sandbox: sandboxOptions(),

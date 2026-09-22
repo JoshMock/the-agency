@@ -19,6 +19,7 @@ import {
   resolveMounts,
   trustedConfigDir,
   stripSecurityFields,
+  SENSITIVE_HOST_PREFIXES,
 } from './config.js'
 
 describe('resolveAllowedDomains', () => {
@@ -368,6 +369,12 @@ describe('loadConfig', () => {
     writeTrusted({ mounts: [{ host: '~/.config/tool', guest: '/root/.config/tool' }] })
     const cfg = load()
     assert.deepEqual(cfg.mounts, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool' }])
+  })
+
+  it('reads readonly flag from trusted config mounts', () => {
+    writeTrusted({ mounts: [{ host: '~/.config/tool', guest: '/root/.config/tool', readonly: true }] })
+    const cfg = load()
+    assert.deepEqual(cfg.mounts, [{ host: join(homedir(), '.config/tool'), guest: '/root/.config/tool', readonly: true }])
   })
 
   it('finds config file in a parent directory', () => {
@@ -821,6 +828,89 @@ describe('resolveMounts', () => {
         { host: '/bad', guest: 'not-absolute' },
       ]),
       /mounts\[1\].*guest.*must be an absolute path/
+    )
+  })
+
+  it('passes through readonly: true', () => {
+    const result = resolveMounts([{ host: '/some/path', guest: '/root/path', readonly: true }])
+    assert.deepEqual(result, [{ host: '/some/path', guest: '/root/path', readonly: true }])
+  })
+
+  it('passes through readonly: false', () => {
+    const result = resolveMounts([{ host: '/some/path', guest: '/root/path', readonly: false }])
+    assert.deepEqual(result, [{ host: '/some/path', guest: '/root/path', readonly: false }])
+  })
+
+  it('omits readonly from output when not specified', () => {
+    const result = resolveMounts([{ host: '/some/path', guest: '/root/path' }])
+    assert.ok(!('readonly' in result[0]))
+  })
+
+  it('throws when readonly is not a boolean', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '/some/path', guest: '/root/path', readonly: 'yes' as unknown as boolean }]),
+      /mounts\[0\].*"readonly" must be a boolean/
+    )
+  })
+
+  it('throws when host is a sensitive path (~/.ssh)', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '~/.ssh', guest: '/root/.ssh' }]),
+      /mounts\[0\].*sensitive host path/
+    )
+  })
+
+  it('throws when host is within a sensitive directory (~/.ssh/id_rsa)', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '~/.ssh/id_rsa', guest: '/root/key' }]),
+      /mounts\[0\].*sensitive host path/
+    )
+  })
+
+  it('throws when host is ~/.aws', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '~/.aws', guest: '/root/.aws' }]),
+      /mounts\[0\].*sensitive host path/
+    )
+  })
+
+  it('throws when host is ~/.gnupg', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '~/.gnupg', guest: '/root/.gnupg' }]),
+      /mounts\[0\].*sensitive host path/
+    )
+  })
+
+  it('throws when host is ~/.kube', () => {
+    assert.throws(
+      () => resolveMounts([{ host: '~/.kube', guest: '/root/.kube' }]),
+      /mounts\[0\].*sensitive host path/
+    )
+  })
+
+  it('throws for each path listed in SENSITIVE_HOST_PREFIXES', () => {
+    for (const sensitive of SENSITIVE_HOST_PREFIXES) {
+      assert.throws(
+        () => resolveMounts([{ host: sensitive, guest: '/root/secret' }]),
+        /mounts\[0\].*sensitive host path/,
+        sensitive
+      )
+    }
+  })
+
+  it('does not throw for non-sensitive paths like ~/.config/tool', () => {
+    assert.doesNotThrow(
+      () => resolveMounts([{ host: '~/.config/tool', guest: '/root/.config/tool' }])
+    )
+  })
+
+  it('includes index in error for sensitive path on non-first entry', () => {
+    assert.throws(
+      () => resolveMounts([
+        { host: '/safe/path', guest: '/root/safe' },
+        { host: '~/.ssh', guest: '/root/.ssh' },
+      ]),
+      /mounts\[1\].*sensitive host path/
     )
   })
 })
