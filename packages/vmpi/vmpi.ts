@@ -289,7 +289,7 @@ async function buildPiBundle (): Promise<Buffer> {
 
   const platformArgs = guestPlatformNpmArgs()
   const npmResult = spawnSync(
-    'npm', ['install', tarballPath, '--save', ...platformArgs],
+    'npm', ['install', tarballPath, '--save', '--ignore-scripts', ...platformArgs],
     { cwd: installDir, stdio: 'inherit' }
   )
   if (npmResult.status !== 0) throw new Error('npm install failed while building pi bundle')
@@ -301,7 +301,7 @@ async function buildPiBundle (): Promise<Buffer> {
     info(`Installing ${npmPackages.length} pi package(s) into bundle...`)
     const specs = npmPackages.map(p => p.slice('npm:'.length))
     const pkgResult = spawnSync(
-      'npm', ['install', ...specs, '--save', '--legacy-peer-deps', ...platformArgs],
+      'npm', ['install', ...specs, '--save', '--legacy-peer-deps', '--ignore-scripts', ...platformArgs],
       { cwd: installDir, stdio: 'inherit' }
     )
     if (pkgResult.status !== 0) {
