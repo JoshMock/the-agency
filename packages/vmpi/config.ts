@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { isAbsolute, join } from 'node:path'
+import { isAbsolute, join, sep } from 'node:path'
 
 const require = createRequire(import.meta.url)
 const { cosmiconfigSync } = require('cosmiconfig') as typeof import('cosmiconfig')
@@ -223,6 +223,12 @@ export interface DirectoryMount {
    * Example: `"/root/.config/some-tool"`.
    */
   guest: string
+
+  /**
+   * When `true`, mount the host directory read-only so guest code cannot
+   * modify host files. Defaults to read-write when omitted.
+   */
+  readonly?: boolean
 }
 
 /** A resolved local service entry with the upstream address string. */
@@ -437,6 +443,27 @@ export function resolveLocalServices (network: NetworkConfig | undefined): Resol
 }
 
 /**
+ * Home-relative paths that are blocked from host mounts by default.
+ * Mounting these directories would expose credentials or secrets to any code
+ * running inside the VM.
+ */
+export const SENSITIVE_HOST_PREFIXES: readonly string[] = [
+  '~/.ssh',
+  '~/.aws',
+  '~/.gnupg',
+  '~/.kube',
+  '~/.config/gcloud',
+  '~/.netrc',
+  '~/.git-credentials',
+  '~/.password-store',
+  '~/.local/share/keyrings',
+  '~/.docker',
+  '~/.config/gh',
+  '~/.azure',
+  '~/Library/Keychains',
+]
+
+/**
  * Resolves and validates the `mounts` config entries.
  * Expands a leading `~` in `host` to the current user's home directory.
  * Throws if any entry has an empty `host` or non-absolute `guest` path.
@@ -448,6 +475,7 @@ export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryM
   return (mounts ?? []).map((m, i) => {
     if (typeof m.host !== 'string') throw new Error(`mounts[${i}]: "host" must be a non-empty string`)
     if (typeof m.guest !== 'string') throw new Error(`mounts[${i}]: "guest" must be a non-empty string`)
+    if (m.readonly != null && typeof m.readonly !== 'boolean') throw new Error(`mounts[${i}]: "readonly" must be a boolean`)
 
     const hostInput = m.host.trim()
     const guest = m.guest.trim()
@@ -460,10 +488,22 @@ export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryM
 
     seenGuests.add(guest)
 
+    const home = homedir()
     const host = hostInput.startsWith('~/')
-      ? join(homedir(), hostInput.slice(2))
-      : hostInput === '~' ? homedir() : hostInput
-    return { host, guest }
+      ? join(home, hostInput.slice(2))
+      : hostInput === '~' ? home : hostInput
+
+    // Check for sensitive host paths after ~ expansion
+    const sensitiveExpanded = SENSITIVE_HOST_PREFIXES.map(p =>
+      p.startsWith('~/') ? join(home, p.slice(2)) : p
+    )
+    for (const sensitive of sensitiveExpanded) {
+      if (host === sensitive || host.startsWith(sensitive + sep)) {
+        throw new Error(`mounts[${i}]: sensitive host path "${host}" is not allowed`)
+      }
+    }
+
+    return { host, guest, ...(m.readonly != null ? { readonly: m.readonly } : {}) }
   })
 }
 
