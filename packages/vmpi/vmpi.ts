@@ -755,6 +755,73 @@ program
     cmdStatus()
   })
 
+program
+  .command('policy')
+  .description('Show the effective security policy for the current config')
+  .action(() => {
+    cmdPolicy()
+  })
+
+/** Renders the effective security policy as a human-readable string. */
+export function renderPolicy (config: ResolvedConfig, cwd = process.cwd()): string {
+  const { mounts, network, secrets, missingSecrets } = config
+  const { localServices } = network
+  const lines: string[] = []
+
+  lines.push('Workspace:')
+  lines.push(`  ${cwd} -> /workspace (rw)`)
+
+  lines.push('')
+  lines.push('Additional host mounts:')
+  if (mounts.length === 0) {
+    lines.push('  none')
+  } else {
+    for (const m of mounts) lines.push(`  ${m.host} -> ${m.guest} [${m.readonly ? 'ro' : 'rw'}]`)
+  }
+
+  lines.push('')
+  lines.push('Network:')
+  lines.push(`  policy: ${network.policy}`)
+  for (const d of network.allowedDomains) lines.push(`  ${d}`)
+
+  lines.push('')
+  lines.push('Local services (guest -> host):')
+  if (localServices.length === 0) {
+    lines.push('  none')
+  } else {
+    for (const s of localServices) lines.push(`  ${s.hostname} -> ${s.upstream}`)
+  }
+
+  lines.push('')
+  lines.push('Internal/private networks:')
+  lines.push(localServices.length === 0 ? '  blocked' : '  blocked (except local services above)')
+
+  lines.push('')
+  lines.push('Secrets:')
+  const resolvedEntries = Object.entries(secrets)
+  if (resolvedEntries.length === 0 && missingSecrets.length === 0) {
+    lines.push('  none')
+  } else {
+    for (const [name, entry] of resolvedEntries) lines.push(`  ${name} -> ${entry.hosts.join(', ')} (brokered)`)
+    for (const { name, envVarName } of missingSecrets) lines.push(`  ${name} (missing: $${envVarName})`)
+  }
+
+  lines.push('')
+  lines.push('Pi auth.json:')
+  lines.push('  not exposed')
+
+  lines.push('')
+  lines.push('Project-local security config:')
+  lines.push('  ignored')
+
+  return lines.join('\n')
+}
+
+/** Prints the resolved security policy for the current config. */
+function cmdPolicy (): void {
+  program.configureOutput().writeOut!(`${renderPolicy(getConfig())}\n`)
+}
+
 /**
  * True when this module is the process entry point. Resolves symlinks in
  * process.argv[1] (npm installs the bin as a symlink) so the check matches the

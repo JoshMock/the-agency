@@ -73,6 +73,9 @@ vmpi setup
 # show checkpoint status
 vmpi status
 
+# show the effective security policy (workspace, mounts, network, secrets)
+vmpi policy
+
 # enable Gondolin debug logging
 vmpi setup --debug
 vmpi --debug

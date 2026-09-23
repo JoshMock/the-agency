@@ -5,7 +5,7 @@ import { parseStringPackages } from './packages.js'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks } from './vmpi.js'
+import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy } from './vmpi.js'
 
 /**
  * Wraps `httpHooks.isIpAllowed` to record denied hostnames into a set.
@@ -156,5 +156,58 @@ describe('buildHttpHooks', () => {
     const { httpHooks, guestEnv } = buildHttpHooks(oneSecret, denyAll)
     assert.ok(httpHooks != null)
     assert.notEqual(guestEnv['MY_KEY'], 'real-secret-value')
+  })
+})
+
+describe('renderPolicy', () => {
+  const base = {
+    memory: 1024,
+    cpus: 1,
+    piConfigDir: '/home/user/.pi',
+    stateDir: '/home/user/.vmpi',
+    rootfsExtraMb: 128,
+    guestPackages: [],
+    postSetupHooks: [],
+    missingSecrets: [],
+  }
+
+  it('no mounts, no domains, no secrets', () => {
+    const config = { ...base, mounts: [], network: { policy: 'deny-all' as const, allowedDomains: [], localServices: [] }, secrets: {} }
+    const out = renderPolicy(config, '/my/project')
+    assert.ok(out.includes('/my/project -> /workspace (rw)'))
+    assert.ok(out.includes('Additional host mounts:\n  none'))
+    assert.ok(out.includes('policy: deny-all'))
+    assert.ok(out.includes('Secrets:\n  none'))
+    assert.ok(out.includes('Pi auth.json:\n  not exposed'))
+    assert.ok(out.includes('Project-local security config:\n  ignored'))
+  })
+
+  it('shows resolved secrets with hosts', () => {
+    const secrets = { GITHUB_TOKEN: { hosts: ['api.github.com', 'github.com'], value: 'ghp_xxx' } }
+    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: ['github.com'], localServices: [] }, secrets }
+    const out = renderPolicy(config, '/proj')
+    assert.ok(out.includes('GITHUB_TOKEN -> api.github.com, github.com (brokered)'))
+    assert.ok(out.includes('  github.com'))
+  })
+
+  it('shows missing secrets', () => {
+    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: [], localServices: [] }, secrets: {}, missingSecrets: [{ name: 'OPENAI_API_KEY', envVarName: 'OPENAI_API_KEY' }] }
+    const out = renderPolicy(config, '/proj')
+    assert.ok(out.includes('OPENAI_API_KEY (missing: $OPENAI_API_KEY)'))
+  })
+
+  it('shows additional host mounts', () => {
+    const mounts = [{ host: '/home/user/.config/tool', guest: '/root/.config/tool', readonly: true }]
+    const config = { ...base, mounts, network: { policy: 'allow-all' as const, allowedDomains: [], localServices: [] }, secrets: {} }
+    const out = renderPolicy(config, '/proj')
+    assert.ok(out.includes('/home/user/.config/tool -> /root/.config/tool [ro]'))
+  })
+
+  it('shows local services and notes them as internal exceptions', () => {
+    const localServices = [{ hostname: 'my-api.local', upstream: 'localhost:8080' }]
+    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: [], localServices }, secrets: {} }
+    const out = renderPolicy(config, '/proj')
+    assert.ok(out.includes('my-api.local -> localhost:8080'))
+    assert.ok(out.includes('blocked (except local services above)'))
   })
 })
