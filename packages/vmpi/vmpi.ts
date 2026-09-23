@@ -71,6 +71,11 @@ function info (message: string): void {
   console.error(`[vmpi] ${message}`)
 }
 
+/** Prints a line to stdout via commander's configured output writer. */
+function out (message = ''): void {
+  program.configureOutput().writeOut!(`${message}\n`)
+}
+
 /** Platform-specific hint appended to messages when e2fsprogs is missing. */
 function e2fsprogsHint (): string {
   return process.platform === 'darwin'
@@ -484,9 +489,9 @@ function cmdStatus (): void {
         if (meta.createdAt) extra = `  (created ${meta.createdAt})`
       } catch { /* ignore */ }
     }
-    console.log(`Base checkpoint: ${cpPath}${extra}`)
+    out(`Base checkpoint: ${cpPath}${extra}`)
   } else {
-    console.log('Base checkpoint: not set up (run: vmpi setup)')
+    out('Base checkpoint: not set up (run: vmpi setup)')
   }
 }
 
@@ -499,15 +504,15 @@ function printDebugAudit (): void {
   const deniedList = debugDeniedHosts != null ? [...debugDeniedHosts].sort() : []
   const missingList = debugMissingExes != null ? [...debugMissingExes].sort() : []
   if (deniedList.length === 0 && missingList.length === 0) return
-  console.log('')
-  console.log('[vmpi debug audit]')
+  out('')
+  out('[vmpi debug audit]')
   if (missingList.length > 0) {
-    console.log('  missing executables (attempted but not found):')
-    for (const exe of missingList) console.log(`    ${exe}`)
+    out('  missing executables (attempted but not found):')
+    for (const exe of missingList) out(`    ${exe}`)
   }
   if (deniedList.length > 0) {
-    console.log('  blocked hostnames (attempted but denied by network policy):')
-    for (const host of deniedList) console.log(`    ${host}`)
+    out('  blocked hostnames (attempted but denied by network policy):')
+    for (const host of deniedList) out(`    ${host}`)
   }
 }
 
@@ -819,7 +824,7 @@ export function renderPolicy (config: ResolvedConfig, cwd = process.cwd()): stri
 
 /** Prints the resolved security policy for the current config. */
 function cmdPolicy (): void {
-  program.configureOutput().writeOut!(`${renderPolicy(getConfig())}\n`)
+  out(renderPolicy(getConfig()))
 }
 
 /**
