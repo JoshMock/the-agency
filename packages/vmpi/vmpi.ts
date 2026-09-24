@@ -71,6 +71,11 @@ function info (message: string): void {
   console.error(`[vmpi] ${message}`)
 }
 
+/** Prints a line to stdout via commander's configured output writer. */
+function out (message = ''): void {
+  program.configureOutput().writeOut!(`${message}\n`)
+}
+
 /** Platform-specific hint appended to messages when e2fsprogs is missing. */
 function e2fsprogsHint (): string {
   return process.platform === 'darwin'
@@ -484,9 +489,9 @@ function cmdStatus (): void {
         if (meta.createdAt) extra = `  (created ${meta.createdAt})`
       } catch { /* ignore */ }
     }
-    console.log(`Base checkpoint: ${cpPath}${extra}`)
+    out(`Base checkpoint: ${cpPath}${extra}`)
   } else {
-    console.log('Base checkpoint: not set up (run: vmpi setup)')
+    out('Base checkpoint: not set up (run: vmpi setup)')
   }
 }
 
@@ -499,15 +504,15 @@ function printDebugAudit (): void {
   const deniedList = debugDeniedHosts != null ? [...debugDeniedHosts].sort() : []
   const missingList = debugMissingExes != null ? [...debugMissingExes].sort() : []
   if (deniedList.length === 0 && missingList.length === 0) return
-  console.log('')
-  console.log('[vmpi debug audit]')
+  out('')
+  out('[vmpi debug audit]')
   if (missingList.length > 0) {
-    console.log('  missing executables (attempted but not found):')
-    for (const exe of missingList) console.log(`    ${exe}`)
+    out('  missing executables (attempted but not found):')
+    for (const exe of missingList) out(`    ${exe}`)
   }
   if (deniedList.length > 0) {
-    console.log('  blocked hostnames (attempted but denied by network policy):')
-    for (const host of deniedList) console.log(`    ${host}`)
+    out('  blocked hostnames (attempted but denied by network policy):')
+    for (const host of deniedList) out(`    ${host}`)
   }
 }
 
@@ -754,6 +759,73 @@ program
   .action(() => {
     cmdStatus()
   })
+
+program
+  .command('policy')
+  .description('Show the effective security policy for the current config')
+  .action(() => {
+    cmdPolicy()
+  })
+
+/** Renders the effective security policy as a human-readable string. */
+export function renderPolicy (config: ResolvedConfig, cwd = process.cwd()): string {
+  const { mounts, network, secrets, missingSecrets } = config
+  const { localServices } = network
+  const lines: string[] = []
+
+  lines.push('Workspace:')
+  lines.push(`  ${cwd} -> /workspace (rw)`)
+
+  lines.push('')
+  lines.push('Additional host mounts:')
+  if (mounts.length === 0) {
+    lines.push('  none')
+  } else {
+    for (const m of mounts) lines.push(`  ${m.host} -> ${m.guest} [${m.readonly ? 'ro' : 'rw'}]`)
+  }
+
+  lines.push('')
+  lines.push('Network:')
+  lines.push(`  policy: ${network.policy}`)
+  for (const d of network.allowedDomains) lines.push(`  ${d}`)
+
+  lines.push('')
+  lines.push('Local services (guest -> host):')
+  if (localServices.length === 0) {
+    lines.push('  none')
+  } else {
+    for (const s of localServices) lines.push(`  ${s.hostname} -> ${s.upstream}`)
+  }
+
+  lines.push('')
+  lines.push('Internal/private networks:')
+  lines.push(localServices.length === 0 ? '  blocked' : '  blocked (except local services above)')
+
+  lines.push('')
+  lines.push('Secrets:')
+  const resolvedEntries = Object.entries(secrets)
+  if (resolvedEntries.length === 0 && missingSecrets.length === 0) {
+    lines.push('  none')
+  } else {
+    for (const [name, entry] of resolvedEntries) lines.push(`  ${name} -> ${entry.hosts.join(', ')} (brokered)`)
+    for (const { name, envVarName } of missingSecrets) lines.push(`  ${name} (missing: $${envVarName})`)
+  }
+
+  lines.push('')
+  lines.push('Pi auth.json:')
+  lines.push('  not exposed')
+
+  lines.push('')
+  lines.push('Project-local security config:')
+  lines.push('  ignored')
+
+  return lines.join('\n')
+}
+
+/** Prints the resolved security policy for the current config. */
+function cmdPolicy (): void {
+  out(renderPolicy(getConfig()))
+}
 
 /**
  * True when this module is the process entry point. Resolves symlinks in
