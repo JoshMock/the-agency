@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.4...vmpi-v0.5.0) (2026-09-24)
+
+
+### Features
+
+* add policy subcommand ([#130](https://github.com/JoshMock/the-agency/issues/130)) ([1324e29](https://github.com/JoshMock/the-agency/commit/1324e29ff845e5a7be99a791c0572dba08fc1a5a))
+* auto-broker provider API keys through Gondolin when provider is configured ([#126](https://github.com/JoshMock/the-agency/issues/126)) ([3dea8b5](https://github.com/JoshMock/the-agency/commit/3dea8b545dead1977d62bae1147376c068c46e50))
+* explicit trust model for mounts ([#129](https://github.com/JoshMock/the-agency/issues/129)) ([840eae8](https://github.com/JoshMock/the-agency/commit/840eae87a18cd55d189f0403f62ba4bdf30138b1))
+
+
+### Bug Fixes
+
+* add --ignore-scripts to host-side npm install calls in vmpi bundle builder ([#128](https://github.com/JoshMock/the-agency/issues/128)) ([e6e2c98](https://github.com/JoshMock/the-agency/commit/e6e2c988524a1c2dd5b48504e02e477afacbb989)), closes [#117](https://github.com/JoshMock/the-agency/issues/117)
+* exclude auth.json and trust.json from VM pi config snapshot ([#124](https://github.com/JoshMock/the-agency/issues/124)) ([29f966c](https://github.com/JoshMock/the-agency/commit/29f966c0ae32c12381772db5a1d144e8ded4c732))
+* retain secret mediation under allow-all network policy ([#127](https://github.com/JoshMock/the-agency/issues/127)) ([a682152](https://github.com/JoshMock/the-agency/commit/a682152a20abbd72589075c719b202ad31cac02f))
+
 ## [0.4.4](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.3...vmpi-v0.4.4) (2026-09-18)
 
 
