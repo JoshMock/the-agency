@@ -20,6 +20,7 @@ import {
   trustedConfigDir,
   stripSecurityFields,
   SENSITIVE_HOST_PREFIXES,
+  SECURITY_FIELDS,
 } from './config.js'
 
 describe('resolveAllowedDomains', () => {
@@ -394,6 +395,60 @@ describe('loadConfig', () => {
     process.chdir(subDir)
     const cfg = load()
     assert.equal(cfg.memory, 4096)
+  })
+
+  it('merges guestPackages from multiple directory levels (union)', () => {
+    const subDir = join(tmpDir, 'nested')
+    mkdirSync(subDir, { recursive: true })
+    writeProject({ guestPackages: ['ruby'] })
+    writeFileSync(join(subDir, '.vmpirc.json'), JSON.stringify({ guestPackages: ['go'] }))
+    process.chdir(subDir)
+    const cfg = load()
+    assert.ok(cfg.guestPackages.includes('ruby'), 'parent package should be present')
+    assert.ok(cfg.guestPackages.includes('go'), 'child package should be present')
+  })
+
+  it('concatenates postSetupHooks from multiple directory levels (parent first)', () => {
+    const subDir = join(tmpDir, 'hooks')
+    mkdirSync(subDir, { recursive: true })
+    writeProject({ postSetupHooks: ['echo parent'] })
+    writeFileSync(join(subDir, '.vmpirc.json'), JSON.stringify({ postSetupHooks: ['echo child'] }))
+    process.chdir(subDir)
+    const cfg = load()
+    assert.deepEqual(cfg.postSetupHooks, ['echo parent', 'echo child'])
+  })
+
+  it('child scalar overrides parent scalar when both define the same field', () => {
+    const subDir = join(tmpDir, 'scalar')
+    mkdirSync(subDir, { recursive: true })
+    writeProject({ memory: 2048, cpus: 2 })
+    writeFileSync(join(subDir, '.vmpirc.json'), JSON.stringify({ memory: 4096 }))
+    process.chdir(subDir)
+    const cfg = load()
+    assert.equal(cfg.memory, 4096, 'child memory should win')
+    assert.equal(cfg.cpus, 2, 'parent cpus should be inherited')
+  })
+
+  it('security fields in project-local .vmpirc are stripped and not applied', () => {
+    writeProject({ network: { policy: 'allow-all' }, memory: 512 })
+    const cfg = load()
+    assert.equal(cfg.network.policy, 'deny-all', 'network from .vmpirc must be ignored')
+    assert.equal(cfg.memory, 512, 'non-security field must still be applied')
+  })
+
+  it('security fields in project-local .vmpirc emit a warning per field', () => {
+    const warnings: string[] = []
+    const orig = console.warn
+    console.warn = (msg: string) => { warnings.push(msg) }
+    try {
+      writeProject(Object.fromEntries(SECURITY_FIELDS.map(f => [f, {}])))
+      load()
+    } finally {
+      console.warn = orig
+    }
+    for (const field of SECURITY_FIELDS) {
+      assert.ok(warnings.some(w => w.includes(`"${field}"`)), `expected warning for field "${field}"`)
+    }
   })
 
   it('returns empty secrets object when no secrets configured', () => {

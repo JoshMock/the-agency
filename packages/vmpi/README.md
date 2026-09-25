@@ -97,7 +97,7 @@ Every `vmpi` invocation:
 1. Downloads the pi tarball on the host (cached in `~/.vmpi/cache/`)
 2. Boots a fresh VM and writes the tarball into it
 3. Runs `npm install -g` inside the VM
-4. Creates a disk checkpoint at `~/.vmpi/base-checkpoint.qcow2`
+4. Creates a disk checkpoint at `~/.vmpi/<encoded-cwd>/base-checkpoint.qcow2` where `<encoded-cwd>` is derived from the current working directory (e.g. `--home-alice-Code-my-project--`)
 
 ## Configuration
 
@@ -111,8 +111,9 @@ vmpi reads configuration from two separate sources with different trust levels.
 
 (`~/.config` follows `$XDG_CONFIG_HOME` when set.)
 
-**Project config** holds non-security preferences only. It is searched from your current
-directory up to the root directory with one of the following names:
+**Project config** holds non-security preferences only. All `.vmpirc.*` files found from your current
+directory up to (but not including) `$HOME` are collected and merged, with files closer to the current
+directory taking precedence. File names searched:
 
 - `.vmpirc.json`
 - `.vmpirc.yaml`
@@ -121,9 +122,11 @@ directory up to the root directory with one of the following names:
 Security-sensitive fields (`network`, `mounts`, `secrets`, `piConfigDir`, `stateDir`) are
 read **only** from the trusted config. If a project `.vmpirc.*` declares any of them, they
 are ignored and a warning is printed. This ensures an untrusted repository cannot expand the
-guest's host capabilities. The remaining fields (`memory`, `cpus`, `rootfsExtraMb`,
-`guestPackages`, `postSetupHooks`) may be set per project; when set in both, the project value
-wins for these preferences.
+guest's host capabilities. The remaining fields merge as follows:
+
+- **`memory`, `cpus`, `rootfsExtraMb`**: the value from the closest ancestor file wins.
+- **`guestPackages`**: all values across all ancestor files are unioned.
+- **`postSetupHooks`**: hooks from all ancestor files are concatenated, outermost first.
 
 ### Example trusted `~/.config/vmpi/config.json`
 
@@ -173,7 +176,7 @@ Source is `trusted` (`~/.config/vmpi/config.*`) or `project` (`.vmpirc.*`). `tru
 | `guestPackages` | project | `[]` | Extra Alpine packages to install in the guest during `vmpi setup`, in addition to the defaults: `git`, `fd`, `ripgrep`, `curl`, `jq`, `bash`, `python3`, `py3-pip`, `nodejs`, `npm`, `make`, `patch`, `file`, `sqlite`. |
 | `postSetupHooks` | project | `[]` | Shell commands to run inside the VM after packages are installed, before the checkpoint is saved. Each command runs via `/bin/sh -c`. A non-zero exit aborts setup. Use this to install tools not available as Alpine packages, e.g. `npm install -g typescript` or `gem install rails`. |
 | `piConfigDir` | trusted | `~/.pi` | Path to the pi config directory on the host |
-| `stateDir` | trusted | `~/.vmpi` | Where vmpi stores the base checkpoint and tarball cache |
+| `stateDir` | trusted | `~/.vmpi` | Where vmpi stores checkpoints and tarball cache. Checkpoints are stored per working directory under `<stateDir>/<encoded-cwd>/base-checkpoint.qcow2`. |
 | `network.policy` | trusted | inferred | `"allow-all"`, `"deny-all"`, or `"custom"`. Auto-set to `"custom"` when providers/domains are configured |
 | `network.providers` | trusted | `[]` | LLM provider names to allow (see below) |
 | `network.allowedDomains` | trusted | `[]` | Additional external domain patterns to allow |

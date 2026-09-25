@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { join, relative } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Command } from 'commander'
 import {
@@ -18,7 +18,7 @@ import {
   type HttpIpAllowInfo,
 } from '@earendil-works/gondolin'
 import { loadConfig, trustedConfigDir, type ResolvedConfig } from './config.js'
-import { prepareSessionsForVm, collectSessionsFromVm } from './sessions.js'
+import { prepareSessionsForVm, collectSessionsFromVm, cwdToSessionDirName } from './sessions.js'
 import { findHostTool, guestNpmCpu, guestPlatformTag, npmSupportsLibc } from './host-tools.js'
 import { parseStringPackages } from './packages.js'
 
@@ -55,9 +55,10 @@ function getConfig (): ResolvedConfig {
   return _config
 }
 
-/** Path to the qcow2 base checkpoint file. */
+/** Path to the qcow2 base checkpoint file for the current working directory. */
 function checkpointFile (): string {
-  return join(getConfig().stateDir, 'base-checkpoint.qcow2')
+  const dirName = cwdToSessionDirName(process.cwd())
+  return join(getConfig().stateDir, dirName, 'base-checkpoint.qcow2')
 }
 
 /** Prints a fatal error to stderr and exits with code 1. */
@@ -228,7 +229,8 @@ function guestPlatformNpmArgs (): string[] {
 /**
  * Downloads the pi-coding-agent tarball from the npm registry, installs it
  * locally to get a full `node_modules` tree, and returns a compressed archive
- * of that tree. The archive is cached in `stateDir/cache/`, keyed by version,
+ * of that tree. The archive is cached in `stateDir/cache/` (shared across
+ * directories), keyed by version,
  * guest platform, and the user's pi package list.
  *
  * This approach avoids running `npm install` inside the VM entirely:
@@ -416,7 +418,7 @@ function shellQuote (s: string): string {
 async function cmdSetup (): Promise<void> {
   await ensureRootfsHeadroom()
   info('Building base checkpoint (installing pi)...')
-  mkdirSync(getConfig().stateDir, { recursive: true })
+  mkdirSync(dirname(checkpointFile()), { recursive: true })
 
   const piBundle = await buildPiBundle()
   const { memory, cpus, guestPackages, postSetupHooks } = getConfig()

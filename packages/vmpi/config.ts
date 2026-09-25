@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { isAbsolute, join, sep } from 'node:path'
+import { dirname, isAbsolute, join, sep } from 'node:path'
 
 const require = createRequire(import.meta.url)
 const { cosmiconfigSync } = require('cosmiconfig') as typeof import('cosmiconfig')
@@ -569,12 +569,7 @@ export function loadConfig (opts: { configDir?: string } = {}): ResolvedConfig {
   })
   const trusted: VmpiConfig = trustedExplorer.search(opts.configDir ?? trustedConfigDir())?.config ?? {}
 
-  const projectExplorer = cosmiconfigSync('vmpi', {
-    searchPlaces: ['.vmpirc.json', '.vmpirc.yaml', '.vmpirc.yml'],
-    searchStrategy: 'project',
-  })
-  const projectResult = projectExplorer.search()
-  const project = stripSecurityFields(projectResult?.config ?? {}, projectResult?.filepath)
+  const project = mergeProjectConfigs(collectProjectConfigs())
 
   const memory = num(process.env.VMPI_MEMORY) ?? project.memory ?? trusted.memory ?? 1024
   if (memory < MIN_MEMORY_MB) {
@@ -614,4 +609,60 @@ function num (value: string | undefined): number | undefined {
   if (value == null) return undefined
   const n = Number(value)
   return Number.isNaN(n) ? undefined : n
+}
+
+/**
+ * Walks from the current working directory up to (but not including) the home
+ * directory, collecting any `.vmpirc.*` config files found along the way.
+ * Returns them ordered from most-general (furthest from cwd) to most-specific
+ * (cwd itself), so later entries win when merged.
+ */
+function collectProjectConfigs (): Array<{ config: VmpiConfig; filepath: string }> {
+  const home = homedir()
+  const cwd = process.cwd()
+
+  const dirs: string[] = []
+  let dir = cwd
+  while (dir !== home) {
+    dirs.push(dir)
+    const parent = dirname(dir)
+    if (parent === dir) break // filesystem root
+    dir = parent
+  }
+  dirs.reverse() // most-general first so most-specific wins on merge
+
+  const explorer = cosmiconfigSync('vmpi', {
+    searchPlaces: ['.vmpirc.json', '.vmpirc.yaml', '.vmpirc.yml'],
+    searchStrategy: 'none',
+  })
+
+  const results: Array<{ config: VmpiConfig; filepath: string }> = []
+  for (const d of dirs) {
+    const result = explorer.search(d)
+    if (result != null) results.push({ config: result.config, filepath: result.filepath })
+  }
+  return results
+}
+
+/**
+ * Merges an ordered list of project configs (most-general first, most-specific
+ * last). Scalar fields use last-wins. `guestPackages` is unioned.
+ * `postSetupHooks` is concatenated (parent hooks run before child hooks).
+ * Security-sensitive fields are stripped from each config with a warning.
+ */
+function mergeProjectConfigs (configs: Array<{ config: VmpiConfig; filepath: string }>): VmpiConfig {
+  const merged: VmpiConfig = {}
+  for (const { config: cfg, filepath } of configs) {
+    const safe = stripSecurityFields({ ...cfg }, filepath)
+    if (safe.memory != null) merged.memory = safe.memory
+    if (safe.cpus != null) merged.cpus = safe.cpus
+    if (safe.rootfsExtraMb != null) merged.rootfsExtraMb = safe.rootfsExtraMb
+    if (safe.guestPackages != null) {
+      merged.guestPackages = [...new Set([...(merged.guestPackages ?? []), ...safe.guestPackages])]
+    }
+    if (safe.postSetupHooks != null) {
+      merged.postSetupHooks = [...(merged.postSetupHooks ?? []), ...safe.postSetupHooks]
+    }
+  }
+  return merged
 }
