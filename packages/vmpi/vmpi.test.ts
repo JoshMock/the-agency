@@ -6,6 +6,7 @@ import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } fro
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy } from './vmpi.js'
+import { cwdToSessionDirName } from './sessions.js'
 
 /**
  * Wraps `httpHooks.isIpAllowed` to record denied hostnames into a set.
@@ -209,5 +210,19 @@ describe('renderPolicy', () => {
     const out = renderPolicy(config, '/proj')
     assert.ok(out.includes('my-api.local -> localhost:8080'))
     assert.ok(out.includes('blocked (except local services above)'))
+  })
+})
+
+describe('per-directory checkpoint isolation', () => {
+  it('two different CWDs produce different checkpoint subdirectories under the same stateDir', () => {
+    const stateDir = '/home/user/.vmpi'
+    const dirA = cwdToSessionDirName('/home/alice/project-a')
+    const dirB = cwdToSessionDirName('/home/alice/project-b')
+    assert.notEqual(dirA, dirB)
+    const checkpointA = join(stateDir, dirA, 'base-checkpoint.qcow2')
+    const checkpointB = join(stateDir, dirB, 'base-checkpoint.qcow2')
+    assert.ok(checkpointA.startsWith(stateDir))
+    assert.ok(checkpointB.startsWith(stateDir))
+    assert.notEqual(checkpointA, checkpointB)
   })
 })
