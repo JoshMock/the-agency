@@ -586,8 +586,8 @@ export function loadConfig (opts: { configDir?: string } = {}): ResolvedConfig {
   const allowedDomains = resolveAllowedDomains(trusted.network)
   const policy = resolvePolicy(trusted.network, allowedDomains)
   const localServices = resolveLocalServices(trusted.network)
-  const guestPackages = resolveGuestPackages(project.guestPackages != null ? project.guestPackages : trusted.guestPackages)
-  const postSetupHooks = project.postSetupHooks != null ? project.postSetupHooks : (trusted.postSetupHooks ?? [])
+  const guestPackages = resolveGuestPackages(project.guestPackages ?? trusted.guestPackages)
+  const postSetupHooks = project.postSetupHooks ?? trusted.postSetupHooks ?? []
   const autoProviderSecrets = buildProviderSecretsConfig(trusted.network?.providers)
   // User-declared secrets win on key conflicts.
   const mergedSecrets = { ...autoProviderSecrets, ...(trusted.secrets ?? {}) }

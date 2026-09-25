@@ -55,7 +55,6 @@ function getConfig (): ResolvedConfig {
   return _config
 }
 
-/** Path to the qcow2 base checkpoint file. */
 /** Path to the qcow2 base checkpoint file for the current working directory. */
 function checkpointFile (): string {
   const dirName = cwdToSessionDirName(process.cwd())
