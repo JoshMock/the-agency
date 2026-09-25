@@ -97,7 +97,7 @@ Every `vmpi` invocation:
 1. Downloads the pi tarball on the host (cached in `~/.vmpi/cache/`)
 2. Boots a fresh VM and writes the tarball into it
 3. Runs `npm install -g` inside the VM
-4. Creates a disk checkpoint at `~/.vmpi/base-checkpoint.qcow2`
+4. Creates a disk checkpoint at `~/.vmpi/<encoded-cwd>/base-checkpoint.qcow2` where `<encoded-cwd>` is derived from the current working directory (e.g. `--home-alice-Code-my-project--`)
 
 ## Configuration
 
@@ -173,7 +173,7 @@ Source is `trusted` (`~/.config/vmpi/config.*`) or `project` (`.vmpirc.*`). `tru
 | `guestPackages` | project | `[]` | Extra Alpine packages to install in the guest during `vmpi setup`, in addition to the defaults: `git`, `fd`, `ripgrep`, `curl`, `jq`, `bash`, `python3`, `py3-pip`, `nodejs`, `npm`, `make`, `patch`, `file`, `sqlite`. |
 | `postSetupHooks` | project | `[]` | Shell commands to run inside the VM after packages are installed, before the checkpoint is saved. Each command runs via `/bin/sh -c`. A non-zero exit aborts setup. Use this to install tools not available as Alpine packages, e.g. `npm install -g typescript` or `gem install rails`. |
 | `piConfigDir` | trusted | `~/.pi` | Path to the pi config directory on the host |
-| `stateDir` | trusted | `~/.vmpi` | Where vmpi stores the base checkpoint and tarball cache |
+| `stateDir` | trusted | `~/.vmpi` | Where vmpi stores checkpoints and tarball cache. Checkpoints are stored per working directory under `<stateDir>/<encoded-cwd>/base-checkpoint.qcow2`. |
 | `network.policy` | trusted | inferred | `"allow-all"`, `"deny-all"`, or `"custom"`. Auto-set to `"custom"` when providers/domains are configured |
 | `network.providers` | trusted | `[]` | LLM provider names to allow (see below) |
 | `network.allowedDomains` | trusted | `[]` | Additional external domain patterns to allow |
