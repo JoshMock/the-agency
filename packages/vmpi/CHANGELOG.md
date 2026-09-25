@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.5.0...vmpi-v0.6.0) (2026-09-25)
+
+
+### Features
+
+* multi-level .vmpirc merging and per-directory checkpoints ([#131](https://github.com/JoshMock/the-agency/issues/131)) ([b3f4123](https://github.com/JoshMock/the-agency/commit/b3f4123910c9231c0911518a40496656694bed70))
+
 ## [0.5.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.4...vmpi-v0.5.0) (2026-09-24)
 
 
