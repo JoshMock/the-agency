@@ -83,10 +83,11 @@ vmpi --debug
 
 For one-off filesystem grants, pass `--allow` once per host path. By default, each
 path is mounted read-write at `/mnt/<basename>`; use `host:guest` to choose an
-absolute guest path. The current directory is **not** mounted by default; pass
-`--allow-cwd` to mount it read-write at `/workspace`.
+absolute guest path. Use `--allow-ro` instead of `--allow` to mount a path read-only.
+The current directory is **not** mounted by default; pass `--allow-cwd` to mount it
+read-write at `/workspace`.
 
-> `--allow` uses the same sensitive-path restrictions as trusted `mounts` configuration.
+> `--allow` and `--allow-ro` use the same sensitive-path restrictions as trusted `mounts` configuration.
 
 ```bash
 # expose a directory at its default guest path
@@ -94,6 +95,9 @@ vmpi --allow ~/Documents/reference
 
 # repeat the flag or choose the guest path explicitly
 vmpi --allow ~/Documents/reference --allow /tmp/cache:/mnt/cache
+
+# mount a path read-only
+vmpi --allow-ro ~/Documents/reference
 
 # mount the current directory at /workspace
 vmpi --allow-cwd

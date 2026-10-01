@@ -35,18 +35,23 @@ export const snapshotFilter = (piConfigDir: string, src: string): boolean =>
   !SNAPSHOT_DENIED.has(relative(piConfigDir, src))
 
 /** Converts a runtime mount specification to a directory mount. */
-function runtimeMount (spec: string): DirectoryMount {
+function runtimeMount (spec: string, readonly = false): DirectoryMount {
+  const ro = readonly ? { readonly: true } : {}
   const separator = spec.lastIndexOf(':')
-  if (separator > 0) return { host: spec.slice(0, separator), guest: spec.slice(separator + 1) }
+  if (separator > 0) return { host: spec.slice(0, separator), guest: spec.slice(separator + 1), ...ro }
 
   const name = basename(spec)
   if (name.length === 0) throw new Error(`mount path "${spec}" needs an explicit guest path (use host:guest)`)
-  return { host: spec, guest: `/mnt/${name}` }
+  return { host: spec, guest: `/mnt/${name}`, ...ro }
 }
 
 /** Resolves configured and command-line mounts with the same security validation. */
-export function resolveRuntimeMounts (mounts: DirectoryMount[], allow: string[] = []): DirectoryMount[] {
-  return resolveMounts([...mounts, ...allow.map(runtimeMount)])
+export function resolveRuntimeMounts (mounts: DirectoryMount[], allow: string[] = [], allowRo: string[] = []): DirectoryMount[] {
+  return resolveMounts([
+    ...mounts,
+    ...allow.map(spec => runtimeMount(spec)),
+    ...allowRo.map(spec => runtimeMount(spec, true)),
+  ])
 }
 
 let _config: ResolvedConfig | undefined
@@ -534,14 +539,14 @@ function printDebugAudit (): void {
 }
 
 /** Runs pi in a sandboxed VM resumed from the base checkpoint. */
-async function cmdRun (args: string[], options: { allow?: string[]; allowCwd?: boolean } = {}): Promise<void> {
+async function cmdRun (args: string[], options: { allow?: string[]; allowRo?: string[]; allowCwd?: boolean } = {}): Promise<void> {
   if (!existsSync(checkpointFile())) {
     info('No base checkpoint found -- running setup first...')
     await cmdSetup()
   }
 
   const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts: configuredMounts } = getConfig()
-  const mounts = resolveRuntimeMounts(configuredMounts, options.allow)
+  const mounts = resolveRuntimeMounts(configuredMounts, options.allow, options.allowRo)
   const allowCwd = options.allowCwd ?? false
   const { httpHooks, guestEnv } = buildHttpHooks(secrets)
 
@@ -763,8 +768,9 @@ program
   .allowUnknownOption()
   .option('--debug', 'enable Gondolin debug logging')
   .option('--allow <path>', 'mount a host path read-write (default guest path: /mnt/<basename>)', (path, paths: string[] = []) => [...paths, path], [])
+  .option('--allow-ro <path>', 'mount a host path read-only (default guest path: /mnt/<basename>)', (path, paths: string[] = []) => [...paths, path], [])
   .option('--allow-cwd', 'mount the current directory read-write at /workspace')
-  .action(async (piArgs: string[], opts: { debug?: boolean; allow?: string[]; allowCwd?: boolean }) => {
+  .action(async (piArgs: string[], opts: { debug?: boolean; allow?: string[]; allowRo?: string[]; allowCwd?: boolean }) => {
     if (opts.debug) debugMode = true
     await cmdRun(piArgs, opts)
   })

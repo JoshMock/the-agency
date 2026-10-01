@@ -252,4 +252,15 @@ describe('resolveRuntimeMounts', () => {
       /sensitive host path/
     )
   })
+
+  it('marks --allow-ro mounts read-only', () => {
+    assert.deepEqual(
+      resolveRuntimeMounts([], ['/host/rw'], ['/host/ro', '/host/two:/guest/two']),
+      [
+        { host: '/host/rw', guest: '/mnt/rw' },
+        { host: '/host/ro', guest: '/mnt/ro', readonly: true },
+        { host: '/host/two', guest: '/guest/two', readonly: true },
+      ]
+    )
+  })
 })
