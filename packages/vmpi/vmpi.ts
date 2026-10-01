@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, unlinkSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { tmpdir } from 'node:os'
 import { Command } from 'commander'
 import {
@@ -17,7 +17,7 @@ import {
   type DebugComponent,
   type HttpIpAllowInfo,
 } from '@earendil-works/gondolin'
-import { loadConfig, trustedConfigDir, type ResolvedConfig } from './config.js'
+import { loadConfig, resolveMounts, trustedConfigDir, type DirectoryMount, type ResolvedConfig } from './config.js'
 import { prepareSessionsForVm, collectSessionsFromVm, cwdToSessionDirName } from './sessions.js'
 import { findHostTool, guestNpmCpu, guestPlatformTag, npmSupportsLibc } from './host-tools.js'
 import { parseStringPackages } from './packages.js'
@@ -33,6 +33,21 @@ export const SNAPSHOT_DENIED = new Set(['agent/auth.json', 'agent/trust.json'])
  */
 export const snapshotFilter = (piConfigDir: string, src: string): boolean =>
   !SNAPSHOT_DENIED.has(relative(piConfigDir, src))
+
+/** Converts a runtime mount specification to a directory mount. */
+function runtimeMount (spec: string): DirectoryMount {
+  const separator = spec.lastIndexOf(':')
+  if (separator > 0) return { host: spec.slice(0, separator), guest: spec.slice(separator + 1) }
+
+  const name = basename(spec)
+  if (name.length === 0) throw new Error(`mount path "${spec}" needs an explicit guest path (use host:guest)`)
+  return { host: spec, guest: `/mnt/${name}` }
+}
+
+/** Resolves configured and command-line mounts with the same security validation. */
+export function resolveRuntimeMounts (mounts: DirectoryMount[], allow: string[] = []): DirectoryMount[] {
+  return resolveMounts([...mounts, ...allow.map(runtimeMount)])
+}
 
 let _config: ResolvedConfig | undefined
 let debugMode = false
@@ -107,42 +122,42 @@ async function ensureRootfsHeadroom (): Promise<void> {
   // space directly). Use `dumpe2fs` instead for accurate free block count.
   const dumpe2fs = findHostTool('dumpe2fs')
   if (dumpe2fs == null) {
-    info(`Warning: dumpe2fs not found — skipping rootfs resize check${e2fsprogsHint()}`)
+    info(`Warning: dumpe2fs not found -- skipping rootfs resize check${e2fsprogsHint()}`)
     return
   }
   const dump = spawnSync(dumpe2fs, ['-h', rootfsPath], { stdio: 'pipe' })
   if (dump.status !== 0) {
-    info('Warning: could not inspect rootfs with dumpe2fs — skipping resize check')
+    info('Warning: could not inspect rootfs with dumpe2fs -- skipping resize check')
     return
   }
   const dumpOut = dump.stdout.toString()
   const freeBlocksMatch = dumpOut.match(/Free blocks:\s+(\d+)/)
   const blockSizeMatch = dumpOut.match(/Block size:\s+(\d+)/)
   if (freeBlocksMatch == null || blockSizeMatch == null) {
-    info('Warning: could not parse rootfs free space — skipping resize check')
+    info('Warning: could not parse rootfs free space -- skipping resize check')
     return
   }
   const freeMb = (parseInt(freeBlocksMatch[1]) * parseInt(blockSizeMatch[1])) / (1024 * 1024)
   info(`Rootfs free space: ${freeMb.toFixed(1)} MiB (threshold: ${extraMb} MiB)`)
 
   if (freeMb >= extraMb) {
-    info('Rootfs has sufficient headroom — skipping resize')
+    info('Rootfs has sufficient headroom -- skipping resize')
     return
   }
 
   const e2fsck = findHostTool('e2fsck')
   const resize2fs = findHostTool('resize2fs')
   if (e2fsck == null || resize2fs == null) {
-    die(`rootfs free space is low but e2fsck/resize2fs were not found — cannot grow the image${e2fsprogsHint()}`)
+    die(`rootfs free space is low but e2fsck/resize2fs were not found -- cannot grow the image${e2fsprogsHint()}`)
   }
 
-  info(`Rootfs free space is low — growing image by ${extraMb} MiB...`)
+  info(`Rootfs free space is low -- growing image by ${extraMb} MiB...`)
   const resizeResult = spawnSync('qemu-img', ['resize', rootfsPath, `+${extraMb}M`], { stdio: 'inherit' })
   if (resizeResult.status !== 0) die('qemu-img resize failed')
 
   // e2fsck must run on an unmounted image before resize2fs
   const fsckResult = spawnSync(e2fsck, ['-f', '-y', rootfsPath], { stdio: 'inherit' })
-  // e2fsck exits 1 for corrected errors, 2 for errors requiring reboot — both are fine here
+  // e2fsck exits 1 for corrected errors, 2 for errors requiring reboot -- both are fine here
   if (fsckResult.status != null && fsckResult.status > 2) die('e2fsck failed')
 
   const resizeFsResult = spawnSync(resize2fs, [rootfsPath], { stdio: 'inherit' })
@@ -222,7 +237,7 @@ function guestPlatformNpmArgs (): string[] {
   }
   const args = ['--os=linux', `--cpu=${cpu}`]
   if (npmSupportsLibc()) args.push('--libc=musl')
-  else info('Warning: npm < 10.2 does not support --libc — bundle may contain wrong-libc native modules')
+  else info('Warning: npm < 10.2 does not support --libc -- bundle may contain wrong-libc native modules')
   return args
 }
 
@@ -313,7 +328,7 @@ async function buildPiBundle (): Promise<Buffer> {
       { cwd: installDir, stdio: 'inherit' }
     )
     if (pkgResult.status !== 0) {
-      info('Warning: some pi packages failed to install — they will be skipped in the VM')
+      info('Warning: some pi packages failed to install -- they will be skipped in the VM')
     }
   }
 
@@ -351,7 +366,7 @@ async function buildPiBundle (): Promise<Buffer> {
  * `env` object contains the env vars to set inside the VM guest.
  *
  * For `allow-all` policy, hooks are still created when secrets are configured so
- * that placeholder mediation is retained — guests never receive raw secret values.
+ * that placeholder mediation is retained -- guests never receive raw secret values.
  * Omitting `allowedHosts` in Gondolin's options means "allow all hosts".
  *
  * @param secrets - resolved secret entries keyed by guest env var name
@@ -426,7 +441,7 @@ async function cmdSetup (): Promise<void> {
   // `cow` rootfs mode requires `qemu-img`; `memory` uses QEMU's built-in
   // snapshot mode and needs no extra tooling. We use `cow` here because we
   // are about to checkpoint the disk.
-  // Allow-all HTTP hooks so post-setup hooks (e.g. `npm install -g …`) can
+  // Allow-all HTTP hooks so post-setup hooks (e.g. `npm install -g ...`) can
   // reach the internet. Setup runs under host control, not sandboxed pi, so
   // the user's runtime network policy does not apply here.
   const { httpHooks: setupHttpHooks } = createHttpHooks({ allowedHosts: undefined } as any)
@@ -519,18 +534,19 @@ function printDebugAudit (): void {
 }
 
 /** Runs pi in a sandboxed VM resumed from the base checkpoint. */
-async function cmdRun (args: string[]): Promise<void> {
+async function cmdRun (args: string[], options: { allow?: string[] } = {}): Promise<void> {
   if (!existsSync(checkpointFile())) {
-    info('No base checkpoint found — running setup first...')
+    info('No base checkpoint found -- running setup first...')
     await cmdSetup()
   }
 
-  const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts } = getConfig()
+  const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts: configuredMounts } = getConfig()
+  const mounts = resolveRuntimeMounts(configuredMounts, options.allow)
   const { httpHooks, guestEnv } = buildHttpHooks(secrets)
 
   for (const { name, envVarName } of missingSecrets) {
     const hint = name === envVarName ? `$${envVarName}` : `$${envVarName} (for guest var ${name})`
-    console.error(`[vmpi] warning: secret "${name}" is configured but ${hint} is not set on the host — it will not be injected into the VM`)
+    console.error(`[vmpi] warning: secret "${name}" is configured but ${hint} is not set on the host -- it will not be injected into the VM`)
   }
 
   // Build tcp.hosts map and dns config for any local services.
@@ -608,7 +624,7 @@ async function cmdRun (args: string[]): Promise<void> {
     // (~466 MiB MemTotal on aarch64 after kernel reservations), while the
     // bundle needs ~250 MiB of tmpfs (its ~19k small files each spend a full
     // 4 KiB page). Remount /tmp with an explicit, larger cap before extracting.
-    // The cap is only an upper bound — pages are allocated on demand — so
+    // The cap is only an upper bound -- pages are allocated on demand -- so
     // deriving it from the configured memory keeps every memory setting safe.
     const tmpfsMb = Math.floor(memory * 0.75)
     // Extract to /tmp/lib/ so node_modules lands at /tmp/lib/node_modules,
@@ -691,7 +707,7 @@ async function cmdRun (args: string[]): Promise<void> {
 }
 
 const CONFIG_HELP = `
-Trusted config (${join(trustedConfigDir(), 'config.{json,yaml,yml}')}, override dir with $XDG_CONFIG_HOME) — host-owned, security-sensitive:
+Trusted config (${join(trustedConfigDir(), 'config.{json,yaml,yml}')}, override dir with $XDG_CONFIG_HOME) -- host-owned, security-sensitive:
 
   piConfigDir     pi config dir on host       (env: PI_CONFIG_DIR,  default: ~/.pi)
   stateDir        vmpi state dir on host      (env: VMPI_STATE_DIR, default: ~/.vmpi)
@@ -709,7 +725,7 @@ Trusted config (${join(trustedConfigDir(), 'config.{json,yaml,yml}')}, override 
                                 Each entry maps a host path to an absolute guest path.
                                   [{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool" }]
 
-Project config (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml) — non-security preferences only:
+Project config (.vmpirc.json, .vmpirc.yaml, .vmpirc.yml) -- non-security preferences only:
 
   memory          RAM in MiB                  (env: VMPI_MEMORY,    default: 1024)
   cpus            vCPU count                  (env: VMPI_CPUS,      default: 1)
@@ -741,9 +757,12 @@ program
   .passThroughOptions()
   .allowUnknownOption()
   .option('--debug', 'enable Gondolin debug logging')
-  .action(async (piArgs: string[], opts: { debug?: boolean }) => {
+  .option('--allow <path>', 'mount a host path read-write (default guest path: /mnt/<basename>)', (path, paths: string[] = []) => [...paths, path], [])
+  // declared only so it is consumed here rather than forwarded to pi; the CWD is always mounted
+  .option('--allow-cwd', 'explicitly allow the current directory (already mounted at /workspace)')
+  .action(async (piArgs: string[], opts: { debug?: boolean; allow?: string[] }) => {
     if (opts.debug) debugMode = true
-    await cmdRun(piArgs)
+    await cmdRun(piArgs, opts)
   })
 
 program

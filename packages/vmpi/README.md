@@ -81,6 +81,24 @@ vmpi setup --debug
 vmpi --debug
 ```
 
+For one-off filesystem grants, pass `--allow` once per host path. By default, each
+path is mounted read-write at `/mnt/<basename>`; use `host:guest` to choose an
+absolute guest path. `--allow-cwd` is accepted for scripts that make the workspace
+grant explicit; the current directory is always mounted at `/workspace`.
+
+> `--allow` uses the same sensitive-path restrictions as trusted `mounts` configuration.
+
+```bash
+# expose a directory at its default guest path
+vmpi --allow ~/Documents/reference
+
+# repeat the flag or choose the guest path explicitly
+vmpi --allow ~/Documents/reference --allow /tmp/cache:/mnt/cache
+
+# explicit form of the default workspace mount
+vmpi --allow-cwd
+```
+
 Every `vmpi` invocation:
 
 1. Resumes an ephemeral VM from the base checkpoint (network: configured policy, VFS mounts)
@@ -182,7 +200,7 @@ Source is `trusted` (`~/.config/vmpi/config.*`) or `project` (`.vmpirc.*`). `tru
 | `network.allowedDomains` | trusted | `[]` | Additional external domain patterns to allow |
 | `network.localServices` | trusted | `[]` | Host services to expose inside the VM. Each entry is `{ hostname, port }`. The VM can reach `hostname` at the given host `port` via a raw TCP tunnel. |
 | `mounts` | trusted | `[]` | Host directories to mount into the VM at runtime. Each entry is `{ "host": "...", "guest": "...", "readonly": false }`. The `host` path supports a leading `~`. Set `"readonly": true` to mount read-only so guest code cannot modify host files (defaults to read-write). Sensitive host paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.config/gcloud`, `~/.netrc`, `~/.git-credentials`, `~/.password-store`, `~/.local/share/keyrings`, `~/.docker`, `~/.config/gh`, `~/.azure`, `~/Library/Keychains`) are rejected. Example: `[{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool", "readonly": true }]`. |
-| `secrets` | trusted | `{}` | Secrets to inject into the VM, each scoped to specific hosts. Each key is the guest env var name. Value: `{ "hosts": ["api.github.com"] }`. Override the host-side var name with `"env"`: `{ "hosts": [...], "env": "MY_PAT" }`. Values are passed via a tmpfs env file and never written to persistent storage. Provider API keys (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are **auto-brokered** when their provider is listed in `network.providers` — the guest receives an opaque placeholder and the real key is injected only for requests to that provider's domains. Explicit `secrets` entries for the same key override the auto-generated scope. |
+| `secrets` | trusted | `{}` | Secrets to inject into the VM, each scoped to specific hosts. Each key is the guest env var name. Value: `{ "hosts": ["api.github.com"] }`. Override the host-side var name with `"env"`: `{ "hosts": [...], "env": "MY_PAT" }`. Values are passed via a tmpfs env file and never written to persistent storage. Provider API keys (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are **auto-brokered** when their provider is listed in `network.providers` -- the guest receives an opaque placeholder and the real key is injected only for requests to that provider's domains. Explicit `secrets` entries for the same key override the auto-generated scope. |
 Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_DIR`, `VMPI_ROOTFS_EXTRA_MB`) override their config file equivalents.
 
 ### Built-in providers

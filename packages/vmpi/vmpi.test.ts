@@ -5,7 +5,7 @@ import { parseStringPackages } from './packages.js'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy } from './vmpi.js'
+import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy, resolveRuntimeMounts } from './vmpi.js'
 import { cwdToSessionDirName } from './sessions.js'
 
 /**
@@ -224,5 +224,32 @@ describe('per-directory checkpoint isolation', () => {
     assert.ok(checkpointA.startsWith(stateDir))
     assert.ok(checkpointB.startsWith(stateDir))
     assert.notEqual(checkpointA, checkpointB)
+  })
+})
+
+describe('resolveRuntimeMounts', () => {
+  it('adds repeatable read-write mounts', () => {
+    assert.deepEqual(
+      resolveRuntimeMounts([], ['/host/one', '/host/two:/guest/two', '/host/three/']),
+      [
+        { host: '/host/one', guest: '/mnt/one' },
+        { host: '/host/two', guest: '/guest/two' },
+        { host: '/host/three/', guest: '/mnt/three' },
+      ]
+    )
+  })
+
+  it('merges runtime mounts with configured mounts before validating them', () => {
+    assert.throws(
+      () => resolveRuntimeMounts([{ host: '/configured', guest: '/mnt/data' }], ['/runtime/data']),
+      /duplicate guest path/
+    )
+  })
+
+  it('applies sensitive path restrictions to runtime mounts', () => {
+    assert.throws(
+      () => resolveRuntimeMounts([], ['~/.ssh']),
+      /sensitive host path/
+    )
   })
 })
