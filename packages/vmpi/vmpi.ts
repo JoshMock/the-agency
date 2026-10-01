@@ -534,7 +534,7 @@ function printDebugAudit (): void {
 }
 
 /** Runs pi in a sandboxed VM resumed from the base checkpoint. */
-async function cmdRun (args: string[], options: { allow?: string[] } = {}): Promise<void> {
+async function cmdRun (args: string[], options: { allow?: string[]; allowCwd?: boolean } = {}): Promise<void> {
   if (!existsSync(checkpointFile())) {
     info('No base checkpoint found -- running setup first...')
     await cmdSetup()
@@ -542,6 +542,7 @@ async function cmdRun (args: string[], options: { allow?: string[] } = {}): Prom
 
   const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts: configuredMounts } = getConfig()
   const mounts = resolveRuntimeMounts(configuredMounts, options.allow)
+  const allowCwd = options.allowCwd ?? false
   const { httpHooks, guestEnv } = buildHttpHooks(secrets)
 
   for (const { name, envVarName } of missingSecrets) {
@@ -599,7 +600,7 @@ async function cmdRun (args: string[], options: { allow?: string[] } = {}): Prom
     debugLog: debugLog(),
     vfs: {
       mounts: {
-        '/workspace': new RealFSProvider(process.cwd()),
+        ...(allowCwd ? { '/workspace': new RealFSProvider(process.cwd()) } : {}),
         '/root/.pi': new RealFSProvider(piConfigSnapshotDir),
         ...userMountProviders,
       },
@@ -615,8 +616,10 @@ async function cmdRun (args: string[], options: { allow?: string[] } = {}): Prom
   process.on('SIGTERM', () => { cleanup().then(() => process.exit()) })
 
   try {
-    info('Preparing sessions for current directory...')
-    prepareSessionsForVm(process.cwd(), piConfigSnapshotDir)
+    if (allowCwd) {
+      info('Preparing sessions for current directory...')
+      prepareSessionsForVm(process.cwd(), piConfigSnapshotDir)
+    }
 
     info('Extracting pi bundle...')
     // /tmp is a tmpfs whose kernel-default size is 50% of guest RAM. That is
@@ -675,7 +678,7 @@ async function cmdRun (args: string[], options: { allow?: string[] } = {}): Prom
         'TERM=xterm-256color',
         ...(debugMode ? ['BASH_ENV=/tmp/vmpi-init.sh'] : []),
       ],
-      command: ['/bin/sh', '-c', `${secretsPreamble}cd /workspace && pi ${piArgs}; exit $?`],
+      command: ['/bin/sh', '-c', `${secretsPreamble}cd ${allowCwd ? '/workspace' : '/root'} && pi ${piArgs}; exit $?`],
       attach: true,
     })
     const result = await proc
@@ -691,8 +694,10 @@ async function cmdRun (args: string[], options: { allow?: string[] } = {}): Prom
       printDebugAudit()
     }
 
-    info('Collecting sessions from VM...')
-    collectSessionsFromVm(process.cwd(), piConfigSnapshotDir, piConfigDir)
+    if (allowCwd) {
+      info('Collecting sessions from VM...')
+      collectSessionsFromVm(process.cwd(), piConfigSnapshotDir, piConfigDir)
+    }
     cleanupSnapshot()
 
     process.exit(result.exitCode)
@@ -758,9 +763,8 @@ program
   .allowUnknownOption()
   .option('--debug', 'enable Gondolin debug logging')
   .option('--allow <path>', 'mount a host path read-write (default guest path: /mnt/<basename>)', (path, paths: string[] = []) => [...paths, path], [])
-  // declared only so it is consumed here rather than forwarded to pi; the CWD is always mounted
-  .option('--allow-cwd', 'explicitly allow the current directory (already mounted at /workspace)')
-  .action(async (piArgs: string[], opts: { debug?: boolean; allow?: string[] }) => {
+  .option('--allow-cwd', 'mount the current directory read-write at /workspace')
+  .action(async (piArgs: string[], opts: { debug?: boolean; allow?: string[]; allowCwd?: boolean }) => {
     if (opts.debug) debugMode = true
     await cmdRun(piArgs, opts)
   })
@@ -795,7 +799,7 @@ export function renderPolicy (config: ResolvedConfig, cwd = process.cwd()): stri
   const lines: string[] = []
 
   lines.push('Workspace:')
-  lines.push(`  ${cwd} -> /workspace (rw)`)
+  lines.push(`  ${cwd} -> /workspace (rw) [only with --allow-cwd]`)
 
   lines.push('')
   lines.push('Additional host mounts:')

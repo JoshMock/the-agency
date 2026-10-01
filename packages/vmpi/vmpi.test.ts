@@ -175,7 +175,7 @@ describe('renderPolicy', () => {
   it('no mounts, no domains, no secrets', () => {
     const config = { ...base, mounts: [], network: { policy: 'deny-all' as const, allowedDomains: [], localServices: [] }, secrets: {} }
     const out = renderPolicy(config, '/my/project')
-    assert.ok(out.includes('/my/project -> /workspace (rw)'))
+    assert.ok(out.includes('/my/project -> /workspace (rw) [only with --allow-cwd]'))
     assert.ok(out.includes('Additional host mounts:\n  none'))
     assert.ok(out.includes('policy: deny-all'))
     assert.ok(out.includes('Secrets:\n  none'))

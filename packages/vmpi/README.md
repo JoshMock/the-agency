@@ -6,7 +6,7 @@ Run `pi` sandboxed in a [QEMU](https://www.qemu.org/) microVM via [Gondolin](htt
 
 `vmpi` feels just like `pi`, but the agent runs in a hardware-isolated sandbox with access to only:
 
-- the **current directory** (mounted read-write at `/workspace` via VFS)
+- the **current directory** (mounted read-write at `/workspace` via VFS, only when `--allow-cwd` is passed)
 - `~/.pi` config (mounted read-only at `/root/.pi` via VFS)
 - LLM provider APIs (configurable network allowlist via HTTP hooks)
 
@@ -83,8 +83,8 @@ vmpi --debug
 
 For one-off filesystem grants, pass `--allow` once per host path. By default, each
 path is mounted read-write at `/mnt/<basename>`; use `host:guest` to choose an
-absolute guest path. `--allow-cwd` is accepted for scripts that make the workspace
-grant explicit; the current directory is always mounted at `/workspace`.
+absolute guest path. The current directory is **not** mounted by default; pass
+`--allow-cwd` to mount it read-write at `/workspace`.
 
 > `--allow` uses the same sensitive-path restrictions as trusted `mounts` configuration.
 
@@ -95,14 +95,14 @@ vmpi --allow ~/Documents/reference
 # repeat the flag or choose the guest path explicitly
 vmpi --allow ~/Documents/reference --allow /tmp/cache:/mnt/cache
 
-# explicit form of the default workspace mount
+# mount the current directory at /workspace
 vmpi --allow-cwd
 ```
 
 Every `vmpi` invocation:
 
 1. Resumes an ephemeral VM from the base checkpoint (network: configured policy, VFS mounts)
-2. Mounts the **current directory** at `/workspace`
+2. Mounts the **current directory** at `/workspace` when `--allow-cwd` is passed (otherwise pi runs in `/root`)
 3. Mounts `~/.pi` at `/root/.pi`
 4. Runs `pi update` to install any pi packages listed in the config
 5. Prepares Pi session history: symlinks `~/.pi/agent/sessions/` subdirectory to host CWD session dir
@@ -234,7 +234,7 @@ egress and blocks requests to unlisted hosts.
 ### Session continuity
 
 Pi stores sessions under `~/.pi/agent/sessions/` named after the project path.
-Because the project is always mounted at `/workspace` inside the VM, vmpi translates
+When the project is mounted at `/workspace` inside the VM (via `--allow-cwd`), vmpi translates
 session directories on both sides:
 
 - **Before launch:** a symlink `~/.pi/agent/sessions/--workspace--` to host CWD session
