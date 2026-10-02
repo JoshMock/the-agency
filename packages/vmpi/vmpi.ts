@@ -17,7 +17,7 @@ import {
   type DebugComponent,
   type HttpIpAllowInfo,
 } from '@earendil-works/gondolin'
-import { loadConfig, resolveMounts, trustedConfigDir, type DirectoryMount, type ResolvedConfig } from './config.js'
+import { loadConfig, resolveMounts, trustedConfigDir, type AuthSecretPlan, type DirectoryMount, type ResolvedConfig } from './config.js'
 import { prepareSessionsForVm, collectSessionsFromVm, cwdToSessionDirName } from './sessions.js'
 import { findHostTool, guestNpmCpu, guestPlatformTag, npmSupportsLibc } from './host-tools.js'
 import { parseStringPackages } from './packages.js'
@@ -397,21 +397,38 @@ async function buildPiBundle (): Promise<Buffer> {
  */
 export function buildHttpHooks (
   secrets: Record<string, import('./config.js').ResolvedSecretEntry>,
-  network?: import('./config.js').ResolvedNetwork
-): { httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'] | undefined; guestEnv: Record<string, string> } {
+  network?: import('./config.js').ResolvedNetwork,
+  authSecrets?: AuthSecretPlan[]
+): { httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'] | undefined; guestEnv: Record<string, string>; authPlaceholders: Record<string, string> } {
   const { policy, allowedDomains, localServices } = network ?? getConfig().network
   const internalHostnames = localServices.map(s => s.hostname)
-  // We cast to `any` because the Gondolin type for `secrets` is not re-exported.
-  const gondolinSecrets: any = secrets
+  // Only 'proxy' plans get registered with Gondolin; 'direct' plans write the real
+  // access token straight to the snapshot and need no proxy mediation.
+  const proxyPlans = (authSecrets ?? []).filter((s): s is Extract<AuthSecretPlan, { method: 'proxy' }> => s.method === 'proxy')
+  const authSecretNames = new Set(proxyPlans.map(s => s.secretName))
+  const authGondolinSecrets = Object.fromEntries(
+    proxyPlans.map(s => [s.secretName, { value: s.value, hosts: s.hosts }])
+  )
+  const gondolinSecrets: any = { ...secrets, ...authGondolinSecrets }
   const hasSecrets = Object.keys(gondolinSecrets).length > 0
+
+  const partition = (env: Record<string, string>) => {
+    const guestEnv: Record<string, string> = {}
+    const authPlaceholders: Record<string, string> = {}
+    for (const [k, v] of Object.entries(env)) {
+      if (authSecretNames.has(k)) authPlaceholders[k] = v
+      else guestEnv[k] = v
+    }
+    return { guestEnv, authPlaceholders }
+  }
 
   if (policy === 'allow-all') {
     info('Network policy: allow-all (unrestricted)')
-    if (!hasSecrets) return { httpHooks: undefined, guestEnv: {} }
+    if (!hasSecrets) return { httpHooks: undefined, guestEnv: {}, authPlaceholders: {} }
     // Omitting allowedHosts = allow all hosts, but secrets are still mediated
     // via the proxy so guests receive placeholders, not raw secret values.
     const { httpHooks, env } = createHttpHooks({ secrets: gondolinSecrets })
-    return { httpHooks, guestEnv: (env ?? {}) as Record<string, string> }
+    return { httpHooks, ...partition((env ?? {}) as Record<string, string>) }
   }
 
   const baseOpts: Record<string, unknown> = {
@@ -436,7 +453,7 @@ export function buildHttpHooks (
     }
   }
 
-  return { httpHooks, guestEnv: (env ?? {}) as Record<string, string> }
+  return { httpHooks, ...partition((env ?? {}) as Record<string, string>) }
 }
 
 /**
@@ -445,6 +462,35 @@ export function buildHttpHooks (
  */
 function shellQuote (s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`
+}
+
+/**
+ * Builds a synthetic auth.json from brokered auth plans. Direct-mode plans write
+ * the real access token; proxy-mode plans write a Gondolin placeholder which the
+ * proxy substitutes with the real token on egress to the scoped host.
+ */
+export function buildSyntheticAuthJson (
+  authSecrets: AuthSecretPlan[],
+  placeholders: Record<string, string>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const s of authSecrets) {
+    if (s.method === 'direct') {
+      out[s.provider] = { type: 'oauth', access: s.directAccess, refresh: '', expires: s.directExpires }
+    } else {
+      const ph = placeholders[s.secretName]
+      if (ph == null) continue
+      if (s.field === 'refresh') {
+        out[s.provider] = { type: 'oauth', refresh: ph, access: '', expires: 0 }
+      } else if (s.field === 'access') {
+        // permanent key (e.g. openrouter): MAX_SAFE_INTEGER so pi never tries to refresh
+        out[s.provider] = { type: 'oauth', access: ph, refresh: '', expires: Number.MAX_SAFE_INTEGER }
+      } else {
+        out[s.provider] = { type: 'api_key', key: ph }
+      }
+    }
+  }
+  return out
 }
 
 /**
@@ -563,10 +609,10 @@ async function cmdRun (args: string[], options: { allow?: string[]; allowRo?: st
     await cmdSetup()
   }
 
-  const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts: configuredMounts } = getConfig()
+  const { memory, cpus, piConfigDir, network: { localServices }, secrets, missingSecrets, mounts: configuredMounts, authSecrets } = getConfig()
   const mounts = resolveRuntimeMounts(configuredMounts, options.allow, options.allowRo)
   const allowCwd = options.allowCwd ?? false
-  const { httpHooks, guestEnv } = buildHttpHooks(secrets)
+  const { httpHooks, guestEnv, authPlaceholders } = buildHttpHooks(secrets, undefined, authSecrets)
 
   for (const { name, envVarName } of missingSecrets) {
     const hint = name === envVarName ? `$${envVarName}` : `$${envVarName} (for guest var ${name})`
@@ -599,6 +645,17 @@ async function cmdRun (args: string[], options: { allow?: string[]; allowRo?: st
     preserveTimestamps: true,
     filter: (src) => snapshotFilter(piConfigDir, src),
   })
+
+  // Write a synthetic auth.json with Gondolin placeholders so pi inside the VM
+  // can authenticate via the proxy. The real tokens never enter the snapshot.
+  if (authSecrets.length > 0) {
+    const syntheticAuth = buildSyntheticAuthJson(authSecrets, authPlaceholders)
+    if (Object.keys(syntheticAuth).length > 0) {
+      mkdirSync(join(piConfigSnapshotDir, 'agent'), { recursive: true })
+      writeFileSync(join(piConfigSnapshotDir, 'agent', 'auth.json'), JSON.stringify(syntheticAuth, null, 2), { mode: 0o600 })
+      info(`Brokered auth credentials: ${authSecrets.map(s => s.provider).join(', ')}`)
+    }
+  }
 
   if (mounts.length > 0) {
     info('Mounts:')
@@ -813,7 +870,7 @@ program
 
 /** Renders the effective security policy as a human-readable string. */
 export function renderPolicy (config: ResolvedConfig, cwd = process.cwd()): string {
-  const { mounts, network, secrets, missingSecrets } = config
+  const { mounts, network, secrets, missingSecrets, authSecrets } = config
   const { localServices } = network
   const lines: string[] = []
 
@@ -857,8 +914,17 @@ export function renderPolicy (config: ResolvedConfig, cwd = process.cwd()): stri
 
   lines.push('')
   lines.push('Pi auth.json:')
-  lines.push('  not exposed')
-
+  lines.push('  not exposed (host file never enters the VM)')
+  if (authSecrets.length > 0) {
+    lines.push('  brokered credentials:')
+    for (const s of authSecrets) {
+      if (s.method === 'proxy') {
+        lines.push(`    ${s.provider} (${s.field} -> ${s.hosts.join(', ')}, placeholder)`)
+      } else {
+        lines.push(`    ${s.provider} (access token, direct)`)
+      }
+    }
+  }
   lines.push('')
   lines.push('Project-local security config:')
   lines.push('  ignored')

@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
@@ -25,6 +26,7 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
   ],
   anthropic: [
     'api.anthropic.com',
+    'platform.claude.com',
   ],
   ollama: [
     'localhost',
@@ -36,7 +38,28 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
     '*.githubusercontent.com',
   ],
   openrouter: [
-    'openrouter.ai'
+    'openrouter.ai',
+  ],
+  xai: [
+    'api.x.ai',
+    'auth.x.ai',
+  ],
+  'kimi-coding': [
+    'api.kimi.com',
+    'auth.kimi.com',
+  ],
+  meta: [
+    'api.meta.ai',
+    'auth.meta.com',
+  ],
+  'openai-codex': [
+    'chatgpt.com',
+    'auth.openai.com',
+  ],
+  radius: [
+    // Radius gateway is user-configured; see network.localServices for self-hosted
+    'localhost',
+    '127.0.0.1',
   ],
   'llama.cpp': [
     'localhost',
@@ -270,6 +293,8 @@ export interface ResolvedConfig {
   missingSecrets: Array<{ name: string; envVarName: string }>
   /** Resolved directory mounts to pass to the VM's virtual filesystem. */
   mounts: DirectoryMount[]
+  /** Auth credentials brokered from the host's auth.json via Gondolin placeholders. */
+  authSecrets: AuthSecretPlan[]
 }
 
 /**
@@ -601,7 +626,10 @@ export function loadConfig (opts: { configDir?: string } = {}): ResolvedConfig {
     )
   }
 
-  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, mounts, network: { policy, allowedDomains, localServices } }
+  const authJson = readHostAuthJson(piConfigDir)
+  const authSecrets = planAuthBrokering(authJson, trusted.network?.providers, policy)
+
+  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, mounts, authSecrets, network: { policy, allowedDomains, localServices } }
 }
 
 /** Parses a string as a number, returning undefined for missing/NaN values. */
@@ -665,4 +693,108 @@ function mergeProjectConfigs (configs: Array<{ config: VmpiConfig; filepath: str
     }
   }
   return merged
+}
+
+/**
+ * A brokered auth credential. Two modes:
+ * - 'proxy': Gondolin mediates the token via a placeholder (token goes in an Authorization header).
+ * - 'direct': the real access token is written into the snapshot (token goes in the request body,
+ *   so the proxy cannot substitute it; the access token is the accepted in-guest irreducible floor).
+ */
+export type AuthSecretPlan =
+  | { method: 'proxy'; secretName: string; value: string; hosts: string[]; provider: string; field: 'refresh' | 'key' | 'access' }
+  | { method: 'direct'; provider: string; directAccess: string; directExpires: number }
+
+/** Per-provider rule for brokering auth.json credentials. */
+type AuthBrokerRule =
+  | { kind: 'oauth' | 'api_key'; method: 'proxy'; secretField: 'refresh' | 'key' | 'access'; secretHosts: string[] }
+  | { kind: 'oauth' | 'api_key'; method: 'direct' }
+
+/**
+ * Brokering rules for providers whose auth.json credentials can be proxied via
+ * Gondolin placeholders or written as direct access tokens.
+ * Gondolin substitutes placeholders in request headers only, so providers
+ * that send the refresh token in the request body use 'direct' mode.
+ */
+const AUTH_BROKER_RULES: Record<string, AuthBrokerRule> = {
+  'github-copilot': {
+    kind: 'oauth',
+    secretField: 'refresh',
+    secretHosts: ['api.github.com'],
+    method: 'proxy',
+  },
+  // refresh_token sent in the JSON body -- proxy cannot substitute, use direct mode
+  anthropic: { kind: 'oauth', method: 'direct' },
+  // refresh_token form-encoded in the body -- proxy cannot substitute, use direct mode
+  xai: { kind: 'oauth', method: 'direct' },
+  'kimi-coding': { kind: 'oauth', method: 'direct' },
+  meta: {
+    kind: 'oauth',
+    secretField: 'refresh',
+    // identity token sent as Authorization: Bearer to the key-mint endpoint
+    secretHosts: ['api.meta.ai'],
+    method: 'proxy',
+  },
+  'openai-codex': { kind: 'oauth', method: 'direct' },
+  openrouter: {
+    kind: 'oauth',
+    // permanent API key in `access`; refresh() is a no-op -- keep expires at MAX_SAFE_INTEGER
+    secretField: 'access',
+    secretHosts: ['openrouter.ai'],
+    method: 'proxy',
+  },
+  // radius: skipped -- gateway URL is user-configured and cannot be scoped statically.
+}
+
+/**
+ * Reads and parses the host auth.json. Returns an empty object on ENOENT or
+ * parse error so callers degrade gracefully.
+ */
+export function readHostAuthJson (piConfigDir: string): Record<string, any> {
+  try {
+    return JSON.parse(readFileSync(join(piConfigDir, 'agent', 'auth.json'), 'utf8')) as Record<string, any>
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Builds the auth-brokering plan: for each provider present in the host's
+ * auth.json that has a broker rule and is reachable under the network policy,
+ * produce an AuthSecretPlan describing how to handle credentials in the snapshot.
+ *
+ * Pure/testable: takes parsed auth.json, provider list, and policy; no I/O.
+ */
+export function planAuthBrokering (
+  authJson: Record<string, any>,
+  providers: string[] | undefined,
+  policy: 'allow-all' | 'deny-all' | 'custom'
+): AuthSecretPlan[] {
+  if (policy === 'deny-all') return []
+  const plans: AuthSecretPlan[] = []
+  for (const [provider, rule] of Object.entries(AUTH_BROKER_RULES)) {
+    const entry = authJson[provider]
+    if (entry == null || typeof entry !== 'object') continue
+    if (entry.type !== rule.kind) continue
+    if (policy === 'custom' && !(providers ?? []).includes(provider)) continue
+    if (rule.method === 'direct') {
+      const access = entry.access
+      const expires = entry.expires
+      if (typeof access !== 'string' || access === '') continue
+      if (typeof expires !== 'number' || !Number.isFinite(expires)) continue
+      plans.push({ method: 'direct', provider, directAccess: access, directExpires: expires })
+    } else {
+      const value: unknown = entry[rule.secretField]
+      if (typeof value !== 'string' || value === '') continue
+      plans.push({
+        method: 'proxy',
+        secretName: `__vmpi_auth_${provider}_${rule.secretField}`,
+        value,
+        hosts: rule.secretHosts,
+        provider,
+        field: rule.secretField,
+      })
+    }
+  }
+  return plans
 }
