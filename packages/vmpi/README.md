@@ -7,7 +7,7 @@ Run `pi` sandboxed in a [QEMU](https://www.qemu.org/) microVM via [Gondolin](htt
 `vmpi` feels just like `pi`, but the agent runs in a hardware-isolated sandbox with access to only:
 
 - the **current directory** (mounted read-write at `/workspace` via VFS, only when `--allow-cwd` is passed)
-- `~/.pi` config (mounted read-only at `/root/.pi` via VFS)
+- `~/.pi` config snapshot (copied into the VM; credentials are [brokered via placeholders](#credential-brokering), never exposed raw)
 - LLM provider APIs (configurable network allowlist via HTTP hooks)
 - any host directories explicitly granted with `--allow` (read-write) or `--allow-ro` (read-only)
 
@@ -108,13 +108,14 @@ Every `vmpi` invocation:
 
 1. Resumes an ephemeral VM from the base checkpoint (network: configured policy, VFS mounts)
 2. Mounts the **current directory** at `/workspace` when `--allow-cwd` is passed (otherwise pi runs in `/root`)
-3. Mounts `~/.pi` at `/root/.pi`
-4. Mounts any directories granted with `--allow`/`--allow-ro`
-5. Runs `pi update` to install any pi packages listed in the config
-6. Prepares Pi session history: symlinks `~/.pi/agent/sessions/` subdirectory to host CWD session dir
-7. Runs `pi [args]` interactively inside the VM with a full PTY
-8. Collects sessions written during the run back to the host
-9. Closes the VM when pi exits
+3. Takes a snapshot of `~/.pi`, excluding `auth.json` and `trust.json`
+4. Writes a synthetic `auth.json` into the snapshot: real tokens are replaced with Gondolin placeholders scoped to each provider's auth host (see [Credential brokering](#credential-brokering))
+5. Mounts any directories granted with `--allow`/`--allow-ro`
+6. Runs `pi update` to install any pi packages listed in the config
+7. Prepares Pi session history: symlinks `~/.pi/agent/sessions/` subdirectory to host CWD session dir
+8. Runs `pi [args]` interactively inside the VM with a full PTY
+9. Collects sessions written during the run back to the host
+10. Closes the VM (snapshot is deleted; real `auth.json` is never written to)
 
 `vmpi setup`:
 
@@ -216,9 +217,13 @@ Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_
 | `github-copilot` | `*.githubcopilot.com`, `api.github.com`, `copilot-proxy.githubusercontent.com` |
 | `gemini` | `generativelanguage.googleapis.com`, `oauth2.googleapis.com`, `www.googleapis.com` |
 | `openai` | `api.openai.com` |
-| `anthropic` | `api.anthropic.com` |
+| `anthropic` | `api.anthropic.com`, `platform.claude.com` |
 | `github` | `github.com`, `*.github.com`, `*.githubusercontent.com` |
-| `openrouter` | `api.openrouter.ai` |
+| `openrouter` | `openrouter.ai` |
+| `xai` | `api.x.ai`, `auth.x.ai` |
+| `kimi-coding` | `api.kimi.com`, `auth.kimi.com` |
+| `meta` | `api.meta.ai`, `auth.meta.com` |
+| `openai-codex` | `chatgpt.com`, `auth.openai.com` |
 | `ollama`, `llama.cpp` | `localhost`, `127.0.0.1` |
 
 Multiple providers can be combined. Their domains are merged with any `allowedDomains`.
@@ -236,6 +241,42 @@ correctly handles large files.
 
 Network policy is enforced via `createHttpHooks`, which intercepts all HTTP/TLS
 egress and blocks requests to unlisted hosts.
+
+### Credential brokering
+
+Pi stores LLM provider credentials in `~/.pi/agent/auth.json`. vmpi never copies
+this file into the VM. Instead, it reads the host credentials and writes a
+**synthetic `auth.json`** into the pi config snapshot.
+
+Two mechanisms are used depending on how the provider sends the token during refresh:
+
+- **Proxy mode** (token goes in an `Authorization: Bearer` header): Gondolin registers the
+  real token and returns an opaque placeholder, which the proxy substitutes on egress.
+  The long-lived token never enters the guest.
+- **Direct mode** (token goes in the request body, which Gondolin cannot substitute):
+  the current access token from the host is written directly into the snapshot.
+  The access token is short-lived and is already the accepted in-guest floor for API
+  calls; the long-lived refresh token never enters the guest.
+
+In both cases the real `~/.pi/agent/auth.json` is never written to.
+
+| Provider | Mode | Notes |
+|---|---|---|
+| `github-copilot` | proxy | refresh token via `Authorization: Bearer`, scoped to `api.github.com` |
+| `meta` | proxy | identity token via `Authorization: Bearer`, scoped to `api.meta.ai` |
+| `openrouter` | proxy | permanent API key via `Authorization: Bearer`, scoped to `openrouter.ai` |
+| `anthropic` | direct | refresh token sent in JSON body |
+| `xai` | direct | refresh token sent in form body |
+| `kimi-coding` | direct | refresh token sent in form body |
+| `openai-codex` | direct | refresh token sent in form body |
+
+Credential brokering activates automatically for any provider listed in
+`network.providers` (or when `policy: allow-all`). The `radius` provider is not
+supported because its gateway URL is user-configured and cannot be scoped statically.
+
+API-key providers (`openai`, `gemini`) have no OAuth flow in `auth.json`; they are
+brokered via host environment variables using the existing `secrets` / `PROVIDER_API_KEY_ENV`
+mechanism instead.
 
 ### Session continuity
 

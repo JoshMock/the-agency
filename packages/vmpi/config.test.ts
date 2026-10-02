@@ -1077,10 +1077,12 @@ describe('planAuthBrokering', () => {
     const p = plans[0]
     assert.equal(p.method, 'proxy')
     assert.equal(p.provider, 'github-copilot')
-    assert.equal(p.method === 'proxy' && p.value, 'ghu_real')
-    assert.equal(p.method === 'proxy' && p.field, 'refresh')
-    assert.deepEqual(p.method === 'proxy' && p.hosts, ['api.github.com'])
-    assert.ok(p.method === 'proxy' && p.secretName.startsWith('__vmpi_auth_'))
+    if (p.method === 'proxy') {
+      assert.equal(p.value, 'ghu_real')
+      assert.equal(p.field, 'refresh')
+      assert.deepEqual(p.hosts, ['api.github.com'])
+      assert.ok(p.secretName.startsWith('__vmpi_auth_'))
+    }
   })
 
   it('excludes provider not listed in providers under custom policy', () => {
@@ -1117,10 +1119,13 @@ describe('planAuthBrokering', () => {
     const anthropicEntry = { type: 'oauth', refresh: 'tok_real', access: 'real_acc', expires: 9999 }
     const plans = planAuthBrokering({ anthropic: anthropicEntry }, ['anthropic'], 'custom')
     assert.equal(plans.length, 1)
-    assert.equal(plans[0].method, 'direct')
-    assert.equal(plans[0].provider, 'anthropic')
-    assert.equal(plans[0].method === 'direct' && plans[0].directAccess, 'real_acc')
-    assert.equal(plans[0].method === 'direct' && plans[0].directExpires, 9999)
+    const p = plans[0]
+    assert.equal(p.method, 'direct')
+    assert.equal(p.provider, 'anthropic')
+    if (p.method === 'direct') {
+      assert.equal(p.directAccess, 'real_acc')
+      assert.equal(p.directExpires, 9999)
+    }
   })
 
   it('produces correct method for all new oauth providers', () => {
@@ -1143,10 +1148,14 @@ describe('planAuthBrokering', () => {
     assert.equal(byProvider['openai-codex'].method, 'direct')
     // header-based refresh -- proxy mode
     assert.equal(byProvider.meta.method, 'proxy')
-    assert.equal(byProvider.meta.method === 'proxy' && byProvider.meta.hosts[0], 'api.meta.ai')
+    const meta = byProvider.meta
+    if (meta.method === 'proxy') assert.equal(meta.hosts[0], 'api.meta.ai')
     // permanent key -- proxy mode via access field
     assert.equal(byProvider.openrouter.method, 'proxy')
-    assert.equal(byProvider.openrouter.method === 'proxy' && byProvider.openrouter.field, 'access')
-    assert.equal(byProvider.openrouter.method === 'proxy' && byProvider.openrouter.value, 'key_real')
+    const or = byProvider.openrouter
+    if (or.method === 'proxy') {
+      assert.equal(or.field, 'access')
+      assert.equal(or.value, 'key_real')
+    }
   })
 })

@@ -465,10 +465,9 @@ function shellQuote (s: string): string {
 }
 
 /**
- * Builds a synthetic auth.json from brokered auth plans and their Gondolin
- * placeholders. The result is written into the pi config snapshot so pi inside
- * the VM loads placeholders instead of real tokens; the proxy substitutes the
- * real value on egress.
+ * Builds a synthetic auth.json from brokered auth plans. Direct-mode plans write
+ * the real access token; proxy-mode plans write a Gondolin placeholder which the
+ * proxy substitutes with the real token on egress to the scoped host.
  */
 export function buildSyntheticAuthJson (
   authSecrets: AuthSecretPlan[],
@@ -478,19 +477,17 @@ export function buildSyntheticAuthJson (
   for (const s of authSecrets) {
     if (s.method === 'direct') {
       out[s.provider] = { type: 'oauth', access: s.directAccess, refresh: '', expires: s.directExpires }
-    } else if (s.field === 'refresh') {
-      const ph = placeholders[s.secretName]
-      if (ph == null) continue
-      out[s.provider] = { type: 'oauth', refresh: ph, access: '', expires: 0 }
-    } else if (s.field === 'access') {
-      const ph = placeholders[s.secretName]
-      if (ph == null) continue
-      // permanent key (e.g. openrouter): MAX_SAFE_INTEGER so pi never tries to refresh
-      out[s.provider] = { type: 'oauth', access: ph, refresh: '', expires: Number.MAX_SAFE_INTEGER }
     } else {
       const ph = placeholders[s.secretName]
       if (ph == null) continue
-      out[s.provider] = { type: 'api_key', key: ph }
+      if (s.field === 'refresh') {
+        out[s.provider] = { type: 'oauth', refresh: ph, access: '', expires: 0 }
+      } else if (s.field === 'access') {
+        // permanent key (e.g. openrouter): MAX_SAFE_INTEGER so pi never tries to refresh
+        out[s.provider] = { type: 'oauth', access: ph, refresh: '', expires: Number.MAX_SAFE_INTEGER }
+      } else {
+        out[s.provider] = { type: 'api_key', key: ph }
+      }
     }
   }
   return out

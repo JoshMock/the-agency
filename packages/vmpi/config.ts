@@ -706,19 +706,9 @@ export type AuthSecretPlan =
   | { method: 'direct'; provider: string; directAccess: string; directExpires: number }
 
 /** Per-provider rule for brokering auth.json credentials. */
-interface AuthBrokerRule {
-  /** Credential type as stored in auth.json. */
-  kind: 'oauth' | 'api_key'
-  /** auth.json field holding the long-lived secret (proxy mode) or the field to verify existence (direct mode). */
-  secretField: 'refresh' | 'key' | 'access'
-  /** Hostnames the proxy may substitute this secret into (proxy mode only). */
-  secretHosts: string[]
-  /**
-   * 'proxy': token goes via Authorization header -- register with Gondolin.
-   * 'direct': token goes in the request body -- write real access token to snapshot instead.
-   */
-  method: 'proxy' | 'direct'
-}
+type AuthBrokerRule =
+  | { kind: 'oauth' | 'api_key'; method: 'proxy'; secretField: 'refresh' | 'key' | 'access'; secretHosts: string[] }
+  | { kind: 'oauth' | 'api_key'; method: 'direct' }
 
 /**
  * Brokering rules for providers whose auth.json credentials can be proxied via
@@ -733,27 +723,11 @@ const AUTH_BROKER_RULES: Record<string, AuthBrokerRule> = {
     secretHosts: ['api.github.com'],
     method: 'proxy',
   },
-  anthropic: {
-    kind: 'oauth',
-    secretField: 'refresh',
-    secretHosts: [],
-    // refresh_token is sent in the JSON body -- proxy cannot substitute
-    method: 'direct',
-  },
-  xai: {
-    kind: 'oauth',
-    secretField: 'refresh',
-    secretHosts: [],
-    // refresh_token is form-encoded in the body -- proxy cannot substitute
-    method: 'direct',
-  },
-  'kimi-coding': {
-    kind: 'oauth',
-    secretField: 'refresh',
-    secretHosts: [],
-    // refresh_token is form-encoded in the body -- proxy cannot substitute
-    method: 'direct',
-  },
+  // refresh_token sent in the JSON body -- proxy cannot substitute, use direct mode
+  anthropic: { kind: 'oauth', method: 'direct' },
+  // refresh_token form-encoded in the body -- proxy cannot substitute, use direct mode
+  xai: { kind: 'oauth', method: 'direct' },
+  'kimi-coding': { kind: 'oauth', method: 'direct' },
   meta: {
     kind: 'oauth',
     secretField: 'refresh',
@@ -761,13 +735,7 @@ const AUTH_BROKER_RULES: Record<string, AuthBrokerRule> = {
     secretHosts: ['api.meta.ai'],
     method: 'proxy',
   },
-  'openai-codex': {
-    kind: 'oauth',
-    secretField: 'refresh',
-    secretHosts: [],
-    // refresh_token is form-encoded in the body -- proxy cannot substitute
-    method: 'direct',
-  },
+  'openai-codex': { kind: 'oauth', method: 'direct' },
   openrouter: {
     kind: 'oauth',
     // permanent API key in `access`; refresh() is a no-op -- keep expires at MAX_SAFE_INTEGER

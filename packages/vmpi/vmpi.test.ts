@@ -309,17 +309,12 @@ describe('buildSyntheticAuthJson', () => {
     assert.equal(result['github-copilot'], undefined)
   })
 
-  it('synthetic oauth entry satisfies pi validation predicate', () => {
+  it('proxy plan satisfies pi auth.json validation predicate', () => {
     const result = buildSyntheticAuthJson([oauthPlan], { '__vmpi_auth_github-copilot_refresh': 'ph_abc123' })
     const cred = result['github-copilot'] as any
-    // Mirrors the validation predicate from pi's core/auth-storage.js
-    const valid =
-      cred.type === 'oauth' &&
-      typeof cred.access === 'string' &&
-      typeof cred.refresh === 'string' &&
-      typeof cred.expires === 'number' &&
-      Number.isFinite(cred.expires)
-    assert.ok(valid, 'synthetic entry must satisfy pi auth.json validation')
+    // mirrors the validation predicate from pi's core/auth-storage.js
+    const valid = cred.type === 'oauth' && typeof cred.access === 'string' && typeof cred.refresh === 'string' && typeof cred.expires === 'number' && Number.isFinite(cred.expires)
+    assert.ok(valid)
   })
 
   it('produces access-field entry with MAX_SAFE_INTEGER expiry for openrouter', () => {
@@ -348,11 +343,13 @@ describe('buildSyntheticAuthJson', () => {
     assert.equal(cred.refresh, '')
     assert.equal(cred.expires, 9999000)
   })
-  it('direct plan satisfies pi validation predicate', () => {
+
+  it('direct plan satisfies pi auth.json validation predicate', () => {
     const plan: AuthSecretPlan = { method: 'direct', provider: 'anthropic', directAccess: 'tok', directExpires: 9999000 }
     const cred = buildSyntheticAuthJson([plan], {})['anthropic'] as any
+    // mirrors the validation predicate from pi's core/auth-storage.js
     const valid = cred.type === 'oauth' && typeof cred.access === 'string' && typeof cred.refresh === 'string' && typeof cred.expires === 'number' && Number.isFinite(cred.expires)
-    assert.ok(valid, 'direct plan must satisfy pi auth.json validation')
+    assert.ok(valid)
   })
 })
 
