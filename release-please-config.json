@@ -16,6 +16,9 @@
     },
     "packages/observability": {
       "component": "pi-observability"
+    },
+    "skills/pi-optimize": {
+      "component": "pi-optimize"
     }
   }
 }
