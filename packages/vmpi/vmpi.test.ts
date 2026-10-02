@@ -5,7 +5,8 @@ import { parseStringPackages } from './packages.js'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy, resolveRuntimeMounts, buildVfsMounts } from './vmpi.js'
+import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, buildSyntheticAuthJson, renderPolicy, resolveRuntimeMounts, buildVfsMounts } from './vmpi.js'
+import { type AuthSecretPlan } from './config.js'
 import { cwdToSessionDirName } from './sessions.js'
 
 /**
@@ -170,43 +171,44 @@ describe('renderPolicy', () => {
     guestPackages: [],
     postSetupHooks: [],
     missingSecrets: [],
+    authSecrets: [],
   }
 
   it('no mounts, no domains, no secrets', () => {
-    const config = { ...base, mounts: [], network: { policy: 'deny-all' as const, allowedDomains: [], localServices: [] }, secrets: {} }
+    const config = { ...base, mounts: [], network: { policy: 'deny-all' as const, allowedDomains: [], localServices: [] }, secrets: {}, authSecrets: [] }
     const out = renderPolicy(config, '/my/project')
     assert.ok(out.includes('/my/project -> /workspace (rw) [only with --allow-cwd]'))
     assert.ok(out.includes('Additional host mounts:\n  none'))
     assert.ok(out.includes('policy: deny-all'))
     assert.ok(out.includes('Secrets:\n  none'))
-    assert.ok(out.includes('Pi auth.json:\n  not exposed'))
+    assert.ok(out.includes('Pi auth.json:\n  not exposed (host file never enters the VM)'))
     assert.ok(out.includes('Project-local security config:\n  ignored'))
   })
 
   it('shows resolved secrets with hosts', () => {
     const secrets = { GITHUB_TOKEN: { hosts: ['api.github.com', 'github.com'], value: 'ghp_xxx' } }
-    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: ['github.com'], localServices: [] }, secrets }
+    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: ['github.com'], localServices: [] }, secrets, authSecrets: [] }
     const out = renderPolicy(config, '/proj')
     assert.ok(out.includes('GITHUB_TOKEN -> api.github.com, github.com (brokered)'))
     assert.ok(out.includes('  github.com'))
   })
 
   it('shows missing secrets', () => {
-    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: [], localServices: [] }, secrets: {}, missingSecrets: [{ name: 'OPENAI_API_KEY', envVarName: 'OPENAI_API_KEY' }] }
+    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: [], localServices: [] }, secrets: {}, missingSecrets: [{ name: 'OPENAI_API_KEY', envVarName: 'OPENAI_API_KEY' }], authSecrets: [] }
     const out = renderPolicy(config, '/proj')
     assert.ok(out.includes('OPENAI_API_KEY (missing: $OPENAI_API_KEY)'))
   })
 
   it('shows additional host mounts', () => {
     const mounts = [{ host: '/home/user/.config/tool', guest: '/root/.config/tool', readonly: true }]
-    const config = { ...base, mounts, network: { policy: 'allow-all' as const, allowedDomains: [], localServices: [] }, secrets: {} }
+    const config = { ...base, mounts, network: { policy: 'allow-all' as const, allowedDomains: [], localServices: [] }, secrets: {}, authSecrets: [] }
     const out = renderPolicy(config, '/proj')
     assert.ok(out.includes('/home/user/.config/tool -> /root/.config/tool [ro]'))
   })
 
   it('shows local services and notes them as internal exceptions', () => {
     const localServices = [{ hostname: 'my-api.local', upstream: 'localhost:8080' }]
-    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: [], localServices }, secrets: {} }
+    const config = { ...base, mounts: [], network: { policy: 'custom' as const, allowedDomains: [], localServices }, secrets: {}, authSecrets: [] }
     const out = renderPolicy(config, '/proj')
     assert.ok(out.includes('my-api.local -> localhost:8080'))
     assert.ok(out.includes('blocked (except local services above)'))
@@ -284,5 +286,138 @@ describe('buildVfsMounts', () => {
     const provider = new RealFSProvider('/host/data')
     const mounts = buildVfsMounts(false, cwd, snapshot, { '/mnt/data': provider })
     assert.equal(mounts['/mnt/data'], provider)
+  })
+})
+
+describe('buildSyntheticAuthJson', () => {
+  const oauthPlan: AuthSecretPlan = {
+    method: 'proxy',
+    secretName: '__vmpi_auth_github-copilot_refresh',
+    value: 'ghu_real_token',
+    hosts: ['api.github.com'],
+    provider: 'github-copilot',
+    field: 'refresh',
+  }
+
+  it('produces oauth entry with placeholder and forced refresh', () => {
+    const result = buildSyntheticAuthJson([oauthPlan], { '__vmpi_auth_github-copilot_refresh': 'ph_abc123' })
+    assert.deepEqual(result['github-copilot'], { type: 'oauth', refresh: 'ph_abc123', access: '', expires: 0 })
+  })
+
+  it('omits entry when placeholder is missing', () => {
+    const result = buildSyntheticAuthJson([oauthPlan], {})
+    assert.equal(result['github-copilot'], undefined)
+  })
+
+  it('proxy plan satisfies pi auth.json validation predicate', () => {
+    const result = buildSyntheticAuthJson([oauthPlan], { '__vmpi_auth_github-copilot_refresh': 'ph_abc123' })
+    const cred = result['github-copilot'] as any
+    // mirrors the validation predicate from pi's core/auth-storage.js
+    const valid = cred.type === 'oauth' && typeof cred.access === 'string' && typeof cred.refresh === 'string' && typeof cred.expires === 'number' && Number.isFinite(cred.expires)
+    assert.ok(valid)
+  })
+
+  it('produces access-field entry with MAX_SAFE_INTEGER expiry for openrouter', () => {
+    const openrouterPlan: AuthSecretPlan = {
+      method: 'proxy',
+      secretName: '__vmpi_auth_openrouter_access',
+      value: 'sk-or-real',
+      hosts: ['openrouter.ai'],
+      provider: 'openrouter',
+      field: 'access',
+    }
+    const result = buildSyntheticAuthJson([openrouterPlan], { __vmpi_auth_openrouter_access: 'ph_or' })
+    const cred = result['openrouter'] as any
+    assert.equal(cred.type, 'oauth')
+    assert.equal(cred.access, 'ph_or')
+    assert.equal(cred.refresh, '')
+    assert.equal(cred.expires, Number.MAX_SAFE_INTEGER)
+  })
+
+  it('writes real access token directly for direct-mode plans', () => {
+    const directPlan: AuthSecretPlan = { method: 'direct', provider: 'anthropic', directAccess: 'real_acc_tok', directExpires: 9999000 }
+    const result = buildSyntheticAuthJson([directPlan], {})
+    const cred = result['anthropic'] as any
+    assert.equal(cred.type, 'oauth')
+    assert.equal(cred.access, 'real_acc_tok')
+    assert.equal(cred.refresh, '')
+    assert.equal(cred.expires, 9999000)
+  })
+
+  it('direct plan satisfies pi auth.json validation predicate', () => {
+    const plan: AuthSecretPlan = { method: 'direct', provider: 'anthropic', directAccess: 'tok', directExpires: 9999000 }
+    const cred = buildSyntheticAuthJson([plan], {})['anthropic'] as any
+    // mirrors the validation predicate from pi's core/auth-storage.js
+    const valid = cred.type === 'oauth' && typeof cred.access === 'string' && typeof cred.refresh === 'string' && typeof cred.expires === 'number' && Number.isFinite(cred.expires)
+    assert.ok(valid)
+  })
+})
+
+describe('buildHttpHooks auth secret partitioning', () => {
+  const authPlan: AuthSecretPlan = {
+    method: 'proxy',
+    secretName: '__vmpi_auth_github-copilot_refresh',
+    value: 'ghu_real_token',
+    hosts: ['api.github.com'],
+    provider: 'github-copilot',
+    field: 'refresh',
+  }
+  const network = { policy: 'custom' as const, allowedDomains: ['api.github.com'], localServices: [] }
+
+  it('auth placeholder does not appear in guestEnv', () => {
+    const { guestEnv, authPlaceholders } = buildHttpHooks({}, network, [authPlan])
+    assert.ok(!('__vmpi_auth_github-copilot_refresh' in guestEnv), 'auth secret must not bleed into guestEnv')
+    assert.ok('__vmpi_auth_github-copilot_refresh' in authPlaceholders, 'auth placeholder must be in authPlaceholders')
+    assert.notEqual(authPlaceholders['__vmpi_auth_github-copilot_refresh'], 'ghu_real_token', 'real value must not be in placeholder')
+  })
+
+  it('env-var secrets still land in guestEnv', () => {
+    const secrets = { MY_KEY: { value: 'keyval', hosts: ['api.example.com'] } }
+    const { guestEnv, authPlaceholders } = buildHttpHooks(secrets, network, [authPlan])
+    assert.ok('MY_KEY' in guestEnv)
+    assert.ok(!('MY_KEY' in authPlaceholders))
+  })
+
+  it('direct-mode plans are not registered with Gondolin', () => {
+    const directPlan: AuthSecretPlan = { method: 'direct', provider: 'anthropic', directAccess: 'tok', directExpires: 9999 }
+    const { authPlaceholders } = buildHttpHooks({}, network, [directPlan])
+    assert.equal(Object.keys(authPlaceholders).length, 0)
+  })
+})
+
+describe('renderPolicy brokered auth display', () => {
+  const base = {
+    memory: 1024,
+    cpus: 1,
+    piConfigDir: '/home/user/.pi',
+    stateDir: '/home/user/.vmpi',
+    rootfsExtraMb: 128,
+    guestPackages: [],
+    postSetupHooks: [],
+    missingSecrets: [],
+    secrets: {},
+    mounts: [],
+    network: { policy: 'custom' as const, allowedDomains: ['api.github.com'], localServices: [] },
+  }
+
+  it('shows brokered credentials when authSecrets present', () => {
+    const authSecrets: AuthSecretPlan[] = [{
+      method: 'proxy',
+      secretName: '__vmpi_auth_github-copilot_refresh',
+      value: 'ghu_real_token',
+      hosts: ['api.github.com'],
+      provider: 'github-copilot',
+      field: 'refresh',
+    }]
+    const out = renderPolicy({ ...base, authSecrets }, '/proj')
+    assert.ok(out.includes('not exposed (host file never enters the VM)'))
+    assert.ok(out.includes('brokered credentials:'))
+    assert.ok(out.includes('github-copilot (refresh -> api.github.com, placeholder)'))
+  })
+
+  it('shows only the not-exposed line when no authSecrets', () => {
+    const out = renderPolicy({ ...base, authSecrets: [] }, '/proj')
+    assert.ok(out.includes('not exposed (host file never enters the VM)'))
+    assert.ok(!out.includes('brokered credentials:'))
   })
 })
