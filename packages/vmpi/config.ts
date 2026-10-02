@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, normalize, sep } from 'node:path'
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
 
 const require = createRequire(import.meta.url)
 const { cosmiconfigSync } = require('cosmiconfig') as typeof import('cosmiconfig')
@@ -489,7 +489,7 @@ export function resolveMounts (mounts: DirectoryMount[] | undefined): DirectoryM
     seenGuests.add(guest)
 
     const home = homedir()
-    const host = normalize(hostInput.startsWith('~/')
+    const host = resolve(hostInput.startsWith('~/')
       ? join(home, hostInput.slice(2))
       : hostInput === '~' ? home : hostInput)
 

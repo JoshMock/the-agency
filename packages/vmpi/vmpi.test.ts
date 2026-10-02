@@ -234,7 +234,7 @@ describe('resolveRuntimeMounts', () => {
       [
         { host: '/host/one', guest: '/mnt/one' },
         { host: '/host/two', guest: '/guest/two' },
-        { host: '/host/three/', guest: '/mnt/three' },
+        { host: '/host/three', guest: '/mnt/three' },
       ]
     )
   })
