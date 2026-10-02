@@ -291,6 +291,7 @@ describe('buildVfsMounts', () => {
 
 describe('buildSyntheticAuthJson', () => {
   const oauthPlan: AuthSecretPlan = {
+    method: 'proxy',
     secretName: '__vmpi_auth_github-copilot_refresh',
     value: 'ghu_real_token',
     hosts: ['api.github.com'],
@@ -320,10 +321,44 @@ describe('buildSyntheticAuthJson', () => {
       Number.isFinite(cred.expires)
     assert.ok(valid, 'synthetic entry must satisfy pi auth.json validation')
   })
+
+  it('produces access-field entry with MAX_SAFE_INTEGER expiry for openrouter', () => {
+    const openrouterPlan: AuthSecretPlan = {
+      method: 'proxy',
+      secretName: '__vmpi_auth_openrouter_access',
+      value: 'sk-or-real',
+      hosts: ['openrouter.ai'],
+      provider: 'openrouter',
+      field: 'access',
+    }
+    const result = buildSyntheticAuthJson([openrouterPlan], { __vmpi_auth_openrouter_access: 'ph_or' })
+    const cred = result['openrouter'] as any
+    assert.equal(cred.type, 'oauth')
+    assert.equal(cred.access, 'ph_or')
+    assert.equal(cred.refresh, '')
+    assert.equal(cred.expires, Number.MAX_SAFE_INTEGER)
+  })
+
+  it('writes real access token directly for direct-mode plans', () => {
+    const directPlan: AuthSecretPlan = { method: 'direct', provider: 'anthropic', directAccess: 'real_acc_tok', directExpires: 9999000 }
+    const result = buildSyntheticAuthJson([directPlan], {})
+    const cred = result['anthropic'] as any
+    assert.equal(cred.type, 'oauth')
+    assert.equal(cred.access, 'real_acc_tok')
+    assert.equal(cred.refresh, '')
+    assert.equal(cred.expires, 9999000)
+  })
+  it('direct plan satisfies pi validation predicate', () => {
+    const plan: AuthSecretPlan = { method: 'direct', provider: 'anthropic', directAccess: 'tok', directExpires: 9999000 }
+    const cred = buildSyntheticAuthJson([plan], {})['anthropic'] as any
+    const valid = cred.type === 'oauth' && typeof cred.access === 'string' && typeof cred.refresh === 'string' && typeof cred.expires === 'number' && Number.isFinite(cred.expires)
+    assert.ok(valid, 'direct plan must satisfy pi auth.json validation')
+  })
 })
 
 describe('buildHttpHooks auth secret partitioning', () => {
   const authPlan: AuthSecretPlan = {
+    method: 'proxy',
     secretName: '__vmpi_auth_github-copilot_refresh',
     value: 'ghu_real_token',
     hosts: ['api.github.com'],
@@ -345,6 +380,12 @@ describe('buildHttpHooks auth secret partitioning', () => {
     assert.ok('MY_KEY' in guestEnv)
     assert.ok(!('MY_KEY' in authPlaceholders))
   })
+
+  it('direct-mode plans are not registered with Gondolin', () => {
+    const directPlan: AuthSecretPlan = { method: 'direct', provider: 'anthropic', directAccess: 'tok', directExpires: 9999 }
+    const { authPlaceholders } = buildHttpHooks({}, network, [directPlan])
+    assert.equal(Object.keys(authPlaceholders).length, 0)
+  })
 })
 
 describe('renderPolicy brokered auth display', () => {
@@ -364,6 +405,7 @@ describe('renderPolicy brokered auth display', () => {
 
   it('shows brokered credentials when authSecrets present', () => {
     const authSecrets: AuthSecretPlan[] = [{
+      method: 'proxy',
       secretName: '__vmpi_auth_github-copilot_refresh',
       value: 'ghu_real_token',
       hosts: ['api.github.com'],

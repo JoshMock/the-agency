@@ -402,16 +402,16 @@ export function buildHttpHooks (
 ): { httpHooks: ReturnType<typeof createHttpHooks>['httpHooks'] | undefined; guestEnv: Record<string, string>; authPlaceholders: Record<string, string> } {
   const { policy, allowedDomains, localServices } = network ?? getConfig().network
   const internalHostnames = localServices.map(s => s.hostname)
-  // We cast to `any` because the Gondolin type for `secrets` is not re-exported.
-  // Auth secrets are merged in so Gondolin generates placeholders for them too.
-  const authSecretNames = new Set((authSecrets ?? []).map(s => s.secretName))
+  // Only 'proxy' plans get registered with Gondolin; 'direct' plans write the real
+  // access token straight to the snapshot and need no proxy mediation.
+  const proxyPlans = (authSecrets ?? []).filter((s): s is Extract<AuthSecretPlan, { method: 'proxy' }> => s.method === 'proxy')
+  const authSecretNames = new Set(proxyPlans.map(s => s.secretName))
   const authGondolinSecrets = Object.fromEntries(
-    (authSecrets ?? []).map(s => [s.secretName, { value: s.value, hosts: s.hosts }])
+    proxyPlans.map(s => [s.secretName, { value: s.value, hosts: s.hosts }])
   )
   const gondolinSecrets: any = { ...secrets, ...authGondolinSecrets }
   const hasSecrets = Object.keys(gondolinSecrets).length > 0
 
-  /** Splits Gondolin's returned env into guest env vars and auth placeholders. */
   const partition = (env: Record<string, string>) => {
     const guestEnv: Record<string, string> = {}
     const authPlaceholders: Record<string, string> = {}
@@ -476,11 +476,20 @@ export function buildSyntheticAuthJson (
 ): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const s of authSecrets) {
-    const ph = placeholders[s.secretName]
-    if (ph == null) continue
-    if (s.field === 'refresh') {
+    if (s.method === 'direct') {
+      out[s.provider] = { type: 'oauth', access: s.directAccess, refresh: '', expires: s.directExpires }
+    } else if (s.field === 'refresh') {
+      const ph = placeholders[s.secretName]
+      if (ph == null) continue
       out[s.provider] = { type: 'oauth', refresh: ph, access: '', expires: 0 }
+    } else if (s.field === 'access') {
+      const ph = placeholders[s.secretName]
+      if (ph == null) continue
+      // permanent key (e.g. openrouter): MAX_SAFE_INTEGER so pi never tries to refresh
+      out[s.provider] = { type: 'oauth', access: ph, refresh: '', expires: Number.MAX_SAFE_INTEGER }
     } else {
+      const ph = placeholders[s.secretName]
+      if (ph == null) continue
       out[s.provider] = { type: 'api_key', key: ph }
     }
   }
@@ -912,7 +921,11 @@ export function renderPolicy (config: ResolvedConfig, cwd = process.cwd()): stri
   if (authSecrets.length > 0) {
     lines.push('  brokered credentials:')
     for (const s of authSecrets) {
-      lines.push(`    ${s.provider} (${s.field} -> ${s.hosts.join(', ')}, placeholder)`)
+      if (s.method === 'proxy') {
+        lines.push(`    ${s.provider} (${s.field} -> ${s.hosts.join(', ')}, placeholder)`)
+      } else {
+        lines.push(`    ${s.provider} (access token, direct)`)
+      }
     }
   }
   lines.push('')

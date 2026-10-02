@@ -38,7 +38,28 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
     '*.githubusercontent.com',
   ],
   openrouter: [
-    'openrouter.ai'
+    'openrouter.ai',
+  ],
+  xai: [
+    'api.x.ai',
+    'auth.x.ai',
+  ],
+  'kimi-coding': [
+    'api.kimi.com',
+    'auth.kimi.com',
+  ],
+  meta: [
+    'api.meta.ai',
+    'auth.meta.com',
+  ],
+  'openai-codex': [
+    'chatgpt.com',
+    'auth.openai.com',
+  ],
+  radius: [
+    // Radius gateway is user-configured; see network.localServices for self-hosted
+    'localhost',
+    '127.0.0.1',
   ],
   'llama.cpp': [
     'localhost',
@@ -674,49 +695,87 @@ function mergeProjectConfigs (configs: Array<{ config: VmpiConfig; filepath: str
   return merged
 }
 
-/** A brokered auth credential: real value + where the proxy may send it. */
-export interface AuthSecretPlan {
-  /** Internal key used to register the secret with Gondolin and read its placeholder back. */
-  secretName: string
-  /** Real token value read from the host auth.json. */
-  value: string
-  /** Hostnames the HTTP proxy may substitute this secret into. */
-  hosts: string[]
-  /** Provider id in auth.json this secret belongs to. */
-  provider: string
-  /** Which auth.json field holds the long-lived secret. */
-  field: 'refresh' | 'key'
-}
+/**
+ * A brokered auth credential. Two modes:
+ * - 'proxy': Gondolin mediates the token via a placeholder (token goes in an Authorization header).
+ * - 'direct': the real access token is written into the snapshot (token goes in the request body,
+ *   so the proxy cannot substitute it; the access token is the accepted in-guest irreducible floor).
+ */
+export type AuthSecretPlan =
+  | { method: 'proxy'; secretName: string; value: string; hosts: string[]; provider: string; field: 'refresh' | 'key' | 'access' }
+  | { method: 'direct'; provider: string; directAccess: string; directExpires: number }
 
 /** Per-provider rule for brokering auth.json credentials. */
 interface AuthBrokerRule {
   /** Credential type as stored in auth.json. */
   kind: 'oauth' | 'api_key'
-  /** auth.json field holding the long-lived secret. */
-  secretField: 'refresh' | 'key'
-  /** Hostnames the secret is forwarded to (subset of the provider's domains). */
+  /** auth.json field holding the long-lived secret (proxy mode) or the field to verify existence (direct mode). */
+  secretField: 'refresh' | 'key' | 'access'
+  /** Hostnames the proxy may substitute this secret into (proxy mode only). */
   secretHosts: string[]
+  /**
+   * 'proxy': token goes via Authorization header -- register with Gondolin.
+   * 'direct': token goes in the request body -- write real access token to snapshot instead.
+   */
+  method: 'proxy' | 'direct'
 }
 
 /**
  * Brokering rules for providers whose auth.json credentials can be proxied via
- * Gondolin placeholders. Extend this table when a new provider stores OAuth
- * credentials in auth.json; verify the secretHosts against the provider's
- * token-refresh endpoint before adding.
+ * Gondolin placeholders or written as direct access tokens.
+ * Gondolin substitutes placeholders in request headers only, so providers
+ * that send the refresh token in the request body use 'direct' mode.
  */
 const AUTH_BROKER_RULES: Record<string, AuthBrokerRule> = {
   'github-copilot': {
     kind: 'oauth',
     secretField: 'refresh',
-    // refresh token is only sent to the GitHub token-mint endpoint
     secretHosts: ['api.github.com'],
+    method: 'proxy',
   },
   anthropic: {
     kind: 'oauth',
     secretField: 'refresh',
-    // refresh token is only sent to the Anthropic OAuth token endpoint
-    secretHosts: ['platform.claude.com'],
+    secretHosts: [],
+    // refresh_token is sent in the JSON body -- proxy cannot substitute
+    method: 'direct',
   },
+  xai: {
+    kind: 'oauth',
+    secretField: 'refresh',
+    secretHosts: [],
+    // refresh_token is form-encoded in the body -- proxy cannot substitute
+    method: 'direct',
+  },
+  'kimi-coding': {
+    kind: 'oauth',
+    secretField: 'refresh',
+    secretHosts: [],
+    // refresh_token is form-encoded in the body -- proxy cannot substitute
+    method: 'direct',
+  },
+  meta: {
+    kind: 'oauth',
+    secretField: 'refresh',
+    // identity token sent as Authorization: Bearer to the key-mint endpoint
+    secretHosts: ['api.meta.ai'],
+    method: 'proxy',
+  },
+  'openai-codex': {
+    kind: 'oauth',
+    secretField: 'refresh',
+    secretHosts: [],
+    // refresh_token is form-encoded in the body -- proxy cannot substitute
+    method: 'direct',
+  },
+  openrouter: {
+    kind: 'oauth',
+    // permanent API key in `access`; refresh() is a no-op -- keep expires at MAX_SAFE_INTEGER
+    secretField: 'access',
+    secretHosts: ['openrouter.ai'],
+    method: 'proxy',
+  },
+  // radius: skipped -- gateway URL is user-configured and cannot be scoped statically.
 }
 
 /**
@@ -734,8 +793,7 @@ export function readHostAuthJson (piConfigDir: string): Record<string, any> {
 /**
  * Builds the auth-brokering plan: for each provider present in the host's
  * auth.json that has a broker rule and is reachable under the network policy,
- * produce an AuthSecretPlan describing the Gondolin secret to register and the
- * synthetic auth.json entry to write into the snapshot.
+ * produce an AuthSecretPlan describing how to handle credentials in the snapshot.
  *
  * Pure/testable: takes parsed auth.json, provider list, and policy; no I/O.
  */
@@ -750,17 +808,25 @@ export function planAuthBrokering (
     const entry = authJson[provider]
     if (entry == null || typeof entry !== 'object') continue
     if (entry.type !== rule.kind) continue
-    const value: unknown = entry[rule.secretField]
-    if (typeof value !== 'string' || value === '') continue
-    // Include when allow-all; for custom policy, provider must be in the providers list.
     if (policy === 'custom' && !(providers ?? []).includes(provider)) continue
-    plans.push({
-      secretName: `__vmpi_auth_${provider}_${rule.secretField}`,
-      value,
-      hosts: rule.secretHosts,
-      provider,
-      field: rule.secretField,
-    })
+    if (rule.method === 'direct') {
+      const access = entry.access
+      const expires = entry.expires
+      if (typeof access !== 'string' || access === '') continue
+      if (typeof expires !== 'number' || !Number.isFinite(expires)) continue
+      plans.push({ method: 'direct', provider, directAccess: access, directExpires: expires })
+    } else {
+      const value: unknown = entry[rule.secretField]
+      if (typeof value !== 'string' || value === '') continue
+      plans.push({
+        method: 'proxy',
+        secretName: `__vmpi_auth_${provider}_${rule.secretField}`,
+        value,
+        hosts: rule.secretHosts,
+        provider,
+        field: rule.secretField,
+      })
+    }
   }
   return plans
 }

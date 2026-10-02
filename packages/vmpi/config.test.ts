@@ -1071,14 +1071,16 @@ describe('readHostAuthJson', () => {
 describe('planAuthBrokering', () => {
   const copilotEntry = { type: 'oauth', refresh: 'ghu_real', access: 'tok', expires: 9999 }
 
-  it('produces a plan for github-copilot with custom policy when provider is listed', () => {
+  it('produces a proxy plan for github-copilot with custom policy when provider is listed', () => {
     const plans = planAuthBrokering({ 'github-copilot': copilotEntry }, ['github-copilot'], 'custom')
     assert.equal(plans.length, 1)
-    assert.equal(plans[0].provider, 'github-copilot')
-    assert.equal(plans[0].value, 'ghu_real')
-    assert.equal(plans[0].field, 'refresh')
-    assert.deepEqual(plans[0].hosts, ['api.github.com'])
-    assert.ok(plans[0].secretName.startsWith('__vmpi_auth_'))
+    const p = plans[0]
+    assert.equal(p.method, 'proxy')
+    assert.equal(p.provider, 'github-copilot')
+    assert.equal(p.method === 'proxy' && p.value, 'ghu_real')
+    assert.equal(p.method === 'proxy' && p.field, 'refresh')
+    assert.deepEqual(p.method === 'proxy' && p.hosts, ['api.github.com'])
+    assert.ok(p.method === 'proxy' && p.secretName.startsWith('__vmpi_auth_'))
   })
 
   it('excludes provider not listed in providers under custom policy', () => {
@@ -1111,11 +1113,40 @@ describe('planAuthBrokering', () => {
     assert.equal(plans.length, 0)
   })
 
-  it('produces a plan for anthropic oauth with correct host', () => {
-    const anthropicEntry = { type: 'oauth', refresh: 'tok_real', access: 'acc', expires: 9999 }
+  it('produces a direct plan for anthropic (body-based refresh)', () => {
+    const anthropicEntry = { type: 'oauth', refresh: 'tok_real', access: 'real_acc', expires: 9999 }
     const plans = planAuthBrokering({ anthropic: anthropicEntry }, ['anthropic'], 'custom')
     assert.equal(plans.length, 1)
+    assert.equal(plans[0].method, 'direct')
     assert.equal(plans[0].provider, 'anthropic')
-    assert.deepEqual(plans[0].hosts, ['platform.claude.com'])
+    assert.equal(plans[0].method === 'direct' && plans[0].directAccess, 'real_acc')
+    assert.equal(plans[0].method === 'direct' && plans[0].directExpires, 9999)
+  })
+
+  it('produces correct method for all new oauth providers', () => {
+    const oauthEntry = { type: 'oauth', refresh: 'tok', access: 'acc', expires: 9999 }
+    const openrouterEntry = { type: 'oauth', access: 'key_real', refresh: '', expires: Number.MAX_SAFE_INTEGER }
+    const authJson = {
+      xai: oauthEntry,
+      'kimi-coding': oauthEntry,
+      meta: oauthEntry,
+      'openai-codex': oauthEntry,
+      openrouter: openrouterEntry,
+    }
+    const providers = ['xai', 'kimi-coding', 'meta', 'openai-codex', 'openrouter']
+    const plans = planAuthBrokering(authJson, providers, 'custom')
+    assert.equal(plans.length, 5)
+    const byProvider = Object.fromEntries(plans.map(p => [p.provider, p]))
+    // body-based refresh -- direct mode
+    assert.equal(byProvider.xai.method, 'direct')
+    assert.equal(byProvider['kimi-coding'].method, 'direct')
+    assert.equal(byProvider['openai-codex'].method, 'direct')
+    // header-based refresh -- proxy mode
+    assert.equal(byProvider.meta.method, 'proxy')
+    assert.equal(byProvider.meta.method === 'proxy' && byProvider.meta.hosts[0], 'api.meta.ai')
+    // permanent key -- proxy mode via access field
+    assert.equal(byProvider.openrouter.method, 'proxy')
+    assert.equal(byProvider.openrouter.method === 'proxy' && byProvider.openrouter.field, 'access')
+    assert.equal(byProvider.openrouter.method === 'proxy' && byProvider.openrouter.value, 'key_real')
   })
 })
