@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path'
@@ -270,6 +271,8 @@ export interface ResolvedConfig {
   missingSecrets: Array<{ name: string; envVarName: string }>
   /** Resolved directory mounts to pass to the VM's virtual filesystem. */
   mounts: DirectoryMount[]
+  /** Auth credentials brokered from the host's auth.json via Gondolin placeholders. */
+  authSecrets: AuthSecretPlan[]
 }
 
 /**
@@ -601,7 +604,10 @@ export function loadConfig (opts: { configDir?: string } = {}): ResolvedConfig {
     )
   }
 
-  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, mounts, network: { policy, allowedDomains, localServices } }
+  const authJson = readHostAuthJson(piConfigDir)
+  const authSecrets = planAuthBrokering(authJson, trusted.network?.providers, policy)
+
+  return { memory, cpus, piConfigDir, stateDir, rootfsExtraMb, guestPackages, postSetupHooks, secrets, missingSecrets, mounts, authSecrets, network: { policy, allowedDomains, localServices } }
 }
 
 /** Parses a string as a number, returning undefined for missing/NaN values. */
@@ -665,4 +671,88 @@ function mergeProjectConfigs (configs: Array<{ config: VmpiConfig; filepath: str
     }
   }
   return merged
+}
+
+/** A brokered auth credential: real value + where the proxy may send it. */
+export interface AuthSecretPlan {
+  /** Internal key used to register the secret with Gondolin and read its placeholder back. */
+  secretName: string
+  /** Real token value read from the host auth.json. */
+  value: string
+  /** Hostnames the HTTP proxy may substitute this secret into. */
+  hosts: string[]
+  /** Provider id in auth.json this secret belongs to. */
+  provider: string
+  /** Which auth.json field holds the long-lived secret. */
+  field: 'refresh' | 'key'
+}
+
+/** Per-provider rule for brokering auth.json credentials. */
+interface AuthBrokerRule {
+  /** Credential type as stored in auth.json. */
+  kind: 'oauth' | 'api_key'
+  /** auth.json field holding the long-lived secret. */
+  secretField: 'refresh' | 'key'
+  /** Hostnames the secret is forwarded to (subset of the provider's domains). */
+  secretHosts: string[]
+}
+
+/**
+ * Brokering rules for providers whose auth.json credentials can be proxied via
+ * Gondolin placeholders. Only github-copilot is implemented; API-key providers
+ * can be added here after verifying their auth.json schema.
+ */
+const AUTH_BROKER_RULES: Record<string, AuthBrokerRule> = {
+  'github-copilot': {
+    kind: 'oauth',
+    secretField: 'refresh',
+    // refresh token is only sent to the GitHub token-mint endpoint
+    secretHosts: ['api.github.com'],
+  },
+}
+
+/**
+ * Reads and parses the host auth.json. Returns an empty object on ENOENT or
+ * parse error so callers degrade gracefully.
+ */
+export function readHostAuthJson (piConfigDir: string): Record<string, any> {
+  try {
+    return JSON.parse(readFileSync(join(piConfigDir, 'agent', 'auth.json'), 'utf8')) as Record<string, any>
+  } catch {
+    return {}
+  }
+}
+
+/**
+ * Builds the auth-brokering plan: for each provider present in the host's
+ * auth.json that has a broker rule and is reachable under the network policy,
+ * produce an AuthSecretPlan describing the Gondolin secret to register and the
+ * synthetic auth.json entry to write into the snapshot.
+ *
+ * Pure/testable: takes parsed auth.json, provider list, and policy; no I/O.
+ */
+export function planAuthBrokering (
+  authJson: Record<string, any>,
+  providers: string[] | undefined,
+  policy: 'allow-all' | 'deny-all' | 'custom'
+): AuthSecretPlan[] {
+  if (policy === 'deny-all') return []
+  const plans: AuthSecretPlan[] = []
+  for (const [provider, rule] of Object.entries(AUTH_BROKER_RULES)) {
+    const entry = authJson[provider]
+    if (entry == null || typeof entry !== 'object') continue
+    if (entry.type !== rule.kind) continue
+    const value: unknown = entry[rule.secretField]
+    if (typeof value !== 'string' || value === '') continue
+    // Include when allow-all; for custom policy, provider must be in the providers list.
+    if (policy === 'custom' && !(providers ?? []).includes(provider)) continue
+    plans.push({
+      secretName: `__vmpi_auth_${provider}_${rule.secretField}`,
+      value,
+      hosts: rule.secretHosts,
+      provider,
+      field: rule.secretField,
+    })
+  }
+  return plans
 }
