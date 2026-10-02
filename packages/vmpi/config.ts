@@ -26,6 +26,7 @@ export const PROVIDER_DOMAINS: Record<string, readonly string[]> = {
   ],
   anthropic: [
     'api.anthropic.com',
+    'platform.claude.com',
   ],
   ollama: [
     'localhost',
@@ -699,8 +700,9 @@ interface AuthBrokerRule {
 
 /**
  * Brokering rules for providers whose auth.json credentials can be proxied via
- * Gondolin placeholders. Only github-copilot is implemented; API-key providers
- * can be added here after verifying their auth.json schema.
+ * Gondolin placeholders. Extend this table when a new provider stores OAuth
+ * credentials in auth.json; verify the secretHosts against the provider's
+ * token-refresh endpoint before adding.
  */
 const AUTH_BROKER_RULES: Record<string, AuthBrokerRule> = {
   'github-copilot': {
@@ -708,6 +710,12 @@ const AUTH_BROKER_RULES: Record<string, AuthBrokerRule> = {
     secretField: 'refresh',
     // refresh token is only sent to the GitHub token-mint endpoint
     secretHosts: ['api.github.com'],
+  },
+  anthropic: {
+    kind: 'oauth',
+    secretField: 'refresh',
+    // refresh token is only sent to the Anthropic OAuth token endpoint
+    secretHosts: ['platform.claude.com'],
   },
 }
 

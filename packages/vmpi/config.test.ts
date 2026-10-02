@@ -1110,4 +1110,12 @@ describe('planAuthBrokering', () => {
     const plans = planAuthBrokering({ 'github-copilot': { type: 'oauth', refresh: '', access: '', expires: 0 } }, ['github-copilot'], 'custom')
     assert.equal(plans.length, 0)
   })
+
+  it('produces a plan for anthropic oauth with correct host', () => {
+    const anthropicEntry = { type: 'oauth', refresh: 'tok_real', access: 'acc', expires: 9999 }
+    const plans = planAuthBrokering({ anthropic: anthropicEntry }, ['anthropic'], 'custom')
+    assert.equal(plans.length, 1)
+    assert.equal(plans[0].provider, 'anthropic')
+    assert.deepEqual(plans[0].hosts, ['platform.claude.com'])
+  })
 })
