@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { createHttpHooks, type HttpIpAllowInfo } from '@earendil-works/gondolin'
+import { createHttpHooks, RealFSProvider, type HttpIpAllowInfo } from '@earendil-works/gondolin'
 import { parseStringPackages } from './packages.js'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy, resolveRuntimeMounts } from './vmpi.js'
+import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy, resolveRuntimeMounts, buildVfsMounts } from './vmpi.js'
 import { cwdToSessionDirName } from './sessions.js'
 
 /**
@@ -262,5 +262,27 @@ describe('resolveRuntimeMounts', () => {
         { host: '/host/two', guest: '/guest/two', readonly: true },
       ]
     )
+  })
+})
+
+describe('buildVfsMounts', () => {
+  const snapshot = '/snap/.pi'
+  const cwd = '/my/project'
+
+  it('omits /workspace by default', () => {
+    const mounts = buildVfsMounts(false, cwd, snapshot, {})
+    assert.ok(!('/workspace' in mounts))
+    assert.ok('/root/.pi' in mounts)
+  })
+
+  it('mounts the cwd at /workspace with --allow-cwd', () => {
+    const mounts = buildVfsMounts(true, cwd, snapshot, {})
+    assert.ok('/workspace' in mounts)
+  })
+
+  it('includes user mount providers alongside the defaults', () => {
+    const provider = new RealFSProvider('/host/data')
+    const mounts = buildVfsMounts(false, cwd, snapshot, { '/mnt/data': provider })
+    assert.equal(mounts['/mnt/data'], provider)
   })
 })

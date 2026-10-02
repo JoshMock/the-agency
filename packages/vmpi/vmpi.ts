@@ -54,6 +54,24 @@ export function resolveRuntimeMounts (mounts: DirectoryMount[], allow: string[] 
   ])
 }
 
+/**
+ * Builds the guest vfs mount map. The current working directory is mounted at
+ * /workspace only when explicitly granted via --allow-cwd, keeping it off the
+ * filesystem boundary by default.
+ */
+export function buildVfsMounts (
+  allowCwd: boolean,
+  cwd: string,
+  piConfigSnapshotDir: string,
+  userMountProviders: Record<string, RealFSProvider | ReadonlyProvider>
+): Record<string, RealFSProvider | ReadonlyProvider> {
+  return {
+    ...(allowCwd ? { '/workspace': new RealFSProvider(cwd) } : {}),
+    '/root/.pi': new RealFSProvider(piConfigSnapshotDir),
+    ...userMountProviders,
+  }
+}
+
 let _config: ResolvedConfig | undefined
 let debugMode = false
 
@@ -594,6 +612,7 @@ async function cmdRun (args: string[], options: { allow?: string[]; allowRo?: st
       return [m.guest, m.readonly ? new ReadonlyProvider(provider) : provider]
     })
   )
+  const vfsMounts = buildVfsMounts(allowCwd, process.cwd(), piConfigSnapshotDir, userMountProviders)
   const vm = await checkpoint.resume({
     sandbox: sandboxOptions(),
     memory: `${memory}M`,
@@ -603,13 +622,7 @@ async function cmdRun (args: string[], options: { allow?: string[]; allowRo?: st
     ...(tcpHosts ? { tcp: { hosts: tcpHosts } } : {}),
     startTimeoutMs: 0,
     debugLog: debugLog(),
-    vfs: {
-      mounts: {
-        ...(allowCwd ? { '/workspace': new RealFSProvider(process.cwd()) } : {}),
-        '/root/.pi': new RealFSProvider(piConfigSnapshotDir),
-        ...userMountProviders,
-      },
-    },
+    vfs: { mounts: vfsMounts },
   })
 
   const cleanup = async () => {
