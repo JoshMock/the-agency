@@ -968,6 +968,13 @@ describe('resolveMounts', () => {
       /mounts\[1\].*sensitive host path/
     )
   })
+
+  it('throws when dot-segments resolve into a sensitive directory', () => {
+    assert.throws(
+      () => resolveMounts([{ host: `${homedir()}/.config/../.ssh`, guest: '/root/key' }]),
+      /mounts\[0\].*sensitive host path/
+    )
+  })
 })
 
 describe('trustedConfigDir', () => {
