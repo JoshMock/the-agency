@@ -1,11 +1,11 @@
 import { describe, it } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { createHttpHooks, type HttpIpAllowInfo } from '@earendil-works/gondolin'
+import { createHttpHooks, RealFSProvider, type HttpIpAllowInfo } from '@earendil-works/gondolin'
 import { parseStringPackages } from './packages.js'
 import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy } from './vmpi.js'
+import { SNAPSHOT_DENIED, snapshotFilter, buildHttpHooks, renderPolicy, resolveRuntimeMounts, buildVfsMounts } from './vmpi.js'
 import { cwdToSessionDirName } from './sessions.js'
 
 /**
@@ -175,7 +175,7 @@ describe('renderPolicy', () => {
   it('no mounts, no domains, no secrets', () => {
     const config = { ...base, mounts: [], network: { policy: 'deny-all' as const, allowedDomains: [], localServices: [] }, secrets: {} }
     const out = renderPolicy(config, '/my/project')
-    assert.ok(out.includes('/my/project -> /workspace (rw)'))
+    assert.ok(out.includes('/my/project -> /workspace (rw) [only with --allow-cwd]'))
     assert.ok(out.includes('Additional host mounts:\n  none'))
     assert.ok(out.includes('policy: deny-all'))
     assert.ok(out.includes('Secrets:\n  none'))
@@ -224,5 +224,65 @@ describe('per-directory checkpoint isolation', () => {
     assert.ok(checkpointA.startsWith(stateDir))
     assert.ok(checkpointB.startsWith(stateDir))
     assert.notEqual(checkpointA, checkpointB)
+  })
+})
+
+describe('resolveRuntimeMounts', () => {
+  it('adds repeatable read-write mounts', () => {
+    assert.deepEqual(
+      resolveRuntimeMounts([], ['/host/one', '/host/two:/guest/two', '/host/three/']),
+      [
+        { host: '/host/one', guest: '/mnt/one' },
+        { host: '/host/two', guest: '/guest/two' },
+        { host: '/host/three', guest: '/mnt/three' },
+      ]
+    )
+  })
+
+  it('merges runtime mounts with configured mounts before validating them', () => {
+    assert.throws(
+      () => resolveRuntimeMounts([{ host: '/configured', guest: '/mnt/data' }], ['/runtime/data']),
+      /duplicate guest path/
+    )
+  })
+
+  it('applies sensitive path restrictions to runtime mounts', () => {
+    assert.throws(
+      () => resolveRuntimeMounts([], ['~/.ssh']),
+      /sensitive host path/
+    )
+  })
+
+  it('marks --allow-ro mounts read-only', () => {
+    assert.deepEqual(
+      resolveRuntimeMounts([], ['/host/rw'], ['/host/ro', '/host/two:/guest/two']),
+      [
+        { host: '/host/rw', guest: '/mnt/rw' },
+        { host: '/host/ro', guest: '/mnt/ro', readonly: true },
+        { host: '/host/two', guest: '/guest/two', readonly: true },
+      ]
+    )
+  })
+})
+
+describe('buildVfsMounts', () => {
+  const snapshot = '/snap/.pi'
+  const cwd = '/my/project'
+
+  it('omits /workspace by default', () => {
+    const mounts = buildVfsMounts(false, cwd, snapshot, {})
+    assert.ok(!('/workspace' in mounts))
+    assert.ok('/root/.pi' in mounts)
+  })
+
+  it('mounts the cwd at /workspace with --allow-cwd', () => {
+    const mounts = buildVfsMounts(true, cwd, snapshot, {})
+    assert.ok('/workspace' in mounts)
+  })
+
+  it('includes user mount providers alongside the defaults', () => {
+    const provider = new RealFSProvider('/host/data')
+    const mounts = buildVfsMounts(false, cwd, snapshot, { '/mnt/data': provider })
+    assert.equal(mounts['/mnt/data'], provider)
   })
 })

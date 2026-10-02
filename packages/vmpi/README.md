@@ -6,9 +6,10 @@ Run `pi` sandboxed in a [QEMU](https://www.qemu.org/) microVM via [Gondolin](htt
 
 `vmpi` feels just like `pi`, but the agent runs in a hardware-isolated sandbox with access to only:
 
-- the **current directory** (mounted read-write at `/workspace` via VFS)
+- the **current directory** (mounted read-write at `/workspace` via VFS, only when `--allow-cwd` is passed)
 - `~/.pi` config (mounted read-only at `/root/.pi` via VFS)
 - LLM provider APIs (configurable network allowlist via HTTP hooks)
+- any host directories explicitly granted with `--allow` (read-write) or `--allow-ro` (read-only)
 
 ...and nothing else.
 
@@ -81,16 +82,39 @@ vmpi setup --debug
 vmpi --debug
 ```
 
+For one-off filesystem grants, pass `--allow` once per host path. By default, each
+path is mounted read-write at `/mnt/<basename>`; use `host:guest` to choose an
+absolute guest path. Use `--allow-ro` instead of `--allow` to mount a path read-only.
+The current directory is **not** mounted by default; pass `--allow-cwd` to mount it
+read-write at `/workspace`.
+
+> `--allow` and `--allow-ro` use the same sensitive-path restrictions as trusted `mounts` configuration.
+
+```bash
+# expose a directory at its default guest path
+vmpi --allow ~/Documents/reference
+
+# repeat the flag or choose the guest path explicitly
+vmpi --allow ~/Documents/reference --allow /tmp/cache:/mnt/cache
+
+# mount a path read-only
+vmpi --allow-ro ~/Documents/reference
+
+# mount the current directory at /workspace
+vmpi --allow-cwd
+```
+
 Every `vmpi` invocation:
 
 1. Resumes an ephemeral VM from the base checkpoint (network: configured policy, VFS mounts)
-2. Mounts the **current directory** at `/workspace`
+2. Mounts the **current directory** at `/workspace` when `--allow-cwd` is passed (otherwise pi runs in `/root`)
 3. Mounts `~/.pi` at `/root/.pi`
-4. Runs `pi update` to install any pi packages listed in the config
-5. Prepares Pi session history: symlinks `~/.pi/agent/sessions/` subdirectory to host CWD session dir
-6. Runs `pi [args]` interactively inside the VM with a full PTY
-7. Collects sessions written during the run back to the host
-8. Closes the VM when pi exits
+4. Mounts any directories granted with `--allow`/`--allow-ro`
+5. Runs `pi update` to install any pi packages listed in the config
+6. Prepares Pi session history: symlinks `~/.pi/agent/sessions/` subdirectory to host CWD session dir
+7. Runs `pi [args]` interactively inside the VM with a full PTY
+8. Collects sessions written during the run back to the host
+9. Closes the VM when pi exits
 
 `vmpi setup`:
 
@@ -182,7 +206,7 @@ Source is `trusted` (`~/.config/vmpi/config.*`) or `project` (`.vmpirc.*`). `tru
 | `network.allowedDomains` | trusted | `[]` | Additional external domain patterns to allow |
 | `network.localServices` | trusted | `[]` | Host services to expose inside the VM. Each entry is `{ hostname, port }`. The VM can reach `hostname` at the given host `port` via a raw TCP tunnel. |
 | `mounts` | trusted | `[]` | Host directories to mount into the VM at runtime. Each entry is `{ "host": "...", "guest": "...", "readonly": false }`. The `host` path supports a leading `~`. Set `"readonly": true` to mount read-only so guest code cannot modify host files (defaults to read-write). Sensitive host paths (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.config/gcloud`, `~/.netrc`, `~/.git-credentials`, `~/.password-store`, `~/.local/share/keyrings`, `~/.docker`, `~/.config/gh`, `~/.azure`, `~/Library/Keychains`) are rejected. Example: `[{ "host": "~/.config/some-tool", "guest": "/root/.config/some-tool", "readonly": true }]`. |
-| `secrets` | trusted | `{}` | Secrets to inject into the VM, each scoped to specific hosts. Each key is the guest env var name. Value: `{ "hosts": ["api.github.com"] }`. Override the host-side var name with `"env"`: `{ "hosts": [...], "env": "MY_PAT" }`. Values are passed via a tmpfs env file and never written to persistent storage. Provider API keys (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are **auto-brokered** when their provider is listed in `network.providers` — the guest receives an opaque placeholder and the real key is injected only for requests to that provider's domains. Explicit `secrets` entries for the same key override the auto-generated scope. |
+| `secrets` | trusted | `{}` | Secrets to inject into the VM, each scoped to specific hosts. Each key is the guest env var name. Value: `{ "hosts": ["api.github.com"] }`. Override the host-side var name with `"env"`: `{ "hosts": [...], "env": "MY_PAT" }`. Values are passed via a tmpfs env file and never written to persistent storage. Provider API keys (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) are **auto-brokered** when their provider is listed in `network.providers` -- the guest receives an opaque placeholder and the real key is injected only for requests to that provider's domains. Explicit `secrets` entries for the same key override the auto-generated scope. |
 Environment variables (`VMPI_MEMORY`, `VMPI_CPUS`, `PI_CONFIG_DIR`, `VMPI_STATE_DIR`, `VMPI_ROOTFS_EXTRA_MB`) override their config file equivalents.
 
 ### Built-in providers
@@ -216,7 +240,7 @@ egress and blocks requests to unlisted hosts.
 ### Session continuity
 
 Pi stores sessions under `~/.pi/agent/sessions/` named after the project path.
-Because the project is always mounted at `/workspace` inside the VM, vmpi translates
+When the project is mounted at `/workspace` inside the VM (via `--allow-cwd`), vmpi translates
 session directories on both sides:
 
 - **Before launch:** a symlink `~/.pi/agent/sessions/--workspace--` to host CWD session

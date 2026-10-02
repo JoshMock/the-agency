@@ -2,7 +2,7 @@ import { describe, it, before, after, beforeEach, afterEach } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir, homedir } from 'node:os'
-import { join } from 'node:path'
+import { join, relative } from 'node:path'
 
 import {
   PROVIDER_DOMAINS,
@@ -966,6 +966,21 @@ describe('resolveMounts', () => {
         { host: '~/.ssh', guest: '/root/.ssh' },
       ]),
       /mounts\[1\].*sensitive host path/
+    )
+  })
+
+  it('throws when dot-segments resolve into a sensitive directory', () => {
+    assert.throws(
+      () => resolveMounts([{ host: `${homedir()}/.config/../.ssh`, guest: '/root/key' }]),
+      /mounts\[0\].*sensitive host path/
+    )
+  })
+
+  it('throws when a relative host path resolves into a sensitive directory', () => {
+    const relSsh = relative(process.cwd(), `${homedir()}/.ssh`)
+    assert.throws(
+      () => resolveMounts([{ host: relSsh, guest: '/root/key' }]),
+      /mounts\[0\].*sensitive host path/
     )
   })
 })
