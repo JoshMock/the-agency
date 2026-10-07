@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.5.0...vmpi-v0.6.0) (2026-10-07)
+
+
+### Features
+
+* broker all native Pi OAuth providers into VM via Gondolin placeholders ([#139](https://github.com/JoshMock/the-agency/issues/139)) ([f185508](https://github.com/JoshMock/the-agency/commit/f18550827fa79e5955ceba36cb6b174825c48c5b))
+* multi-level .vmpirc merging and per-directory checkpoints ([#131](https://github.com/JoshMock/the-agency/issues/131)) ([b3f4123](https://github.com/JoshMock/the-agency/commit/b3f4123910c9231c0911518a40496656694bed70))
+
 ## [0.5.0](https://github.com/JoshMock/the-agency/compare/vmpi-v0.4.4...vmpi-v0.5.0) (2026-09-24)
 
 

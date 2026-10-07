@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JoshMock/the-agency/compare/pi-hashline-edit-v0.3.0...pi-hashline-edit-v0.4.0) (2026-10-07)
+
+
+### Features
+
+* broker all native Pi OAuth providers into VM via Gondolin placeholders ([#139](https://github.com/JoshMock/the-agency/issues/139)) ([f185508](https://github.com/JoshMock/the-agency/commit/f18550827fa79e5955ceba36cb6b174825c48c5b))
+
 ## [0.3.0](https://github.com/JoshMock/the-agency/compare/pi-hashline-edit-v0.2.1...pi-hashline-edit-v0.3.0) (2026-09-11)
 
 
