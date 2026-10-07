@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.5...pi-spec-kit-v0.3.0) (2026-10-07)
+
+
+### Features
+
+* broker all native Pi OAuth providers into VM via Gondolin placeholders ([#139](https://github.com/JoshMock/the-agency/issues/139)) ([f185508](https://github.com/JoshMock/the-agency/commit/f18550827fa79e5955ceba36cb6b174825c48c5b))
+
 ## [0.2.5](https://github.com/JoshMock/the-agency/compare/pi-spec-kit-v0.2.4...pi-spec-kit-v0.2.5) (2026-05-15)
 
 
