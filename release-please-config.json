@@ -17,6 +17,9 @@
     "packages/observability": {
       "component": "pi-observability"
     },
+    "packages/coordinator": {
+      "component": "pi-coordinator"
+    },
     "skills/pi-optimize": {
       "component": "pi-optimize"
     }
