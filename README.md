@@ -7,6 +7,7 @@ A collection of extensions, skills, tools and experiments with the [Pi coding ag
 - [**@the-agency/pi-spec-kit**](./packages/spec-kit/): use [Spec Kit](https://github.com/github/spec-kit) for spec-driven development ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-spec-kit)
 - [**@the-agency/vmpi**](./packages/vmpi/): run `pi` sandboxed in a QEMU microVM via [Gondolin](https://earendil-works.github.io/gondolin/) -- hardware-isolated, no root required ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fvmpi)
 - [**@the-agency/pi-observability**](./packages/observability/): record OpenTelemetry logs for your Pi sessions ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-observability)
+- [**@the-agency/pi-coordinator**](./packages/coordinator/): plan a task before running it -- ask the questions that would change the plan, name the repos, and write a reviewable `pi-task-tree` document ![NPM Downloads](https://img.shields.io/npm/dm/%40the-agency%2Fpi-coordinator)
 
 ## Goals
 
